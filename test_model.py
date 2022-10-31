@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from tensorflow.keras.models import load_model
+from keras.models import load_model
 import tensorflow as tf
 import os
 import cv2

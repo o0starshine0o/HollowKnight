@@ -1,7 +1,7 @@
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras import layers,models, regularizers
-from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPooling2D, Dropout, BatchNormalization, Activation, GlobalAveragePooling2D, Conv3D, MaxPooling3D, GlobalAveragePooling3D, Reshape, Lambda
+from keras.models import load_model
+from keras import layers,models, regularizers
+from keras.layers import Dense, Flatten, Conv2D, MaxPooling2D, Dropout, BatchNormalization, Activation, GlobalAveragePooling2D, Conv3D, MaxPooling3D, GlobalAveragePooling3D, Reshape, Lambda
 
 import time
 import os
@@ -76,7 +76,7 @@ class Model:
             self.private_act_model = load_model("./model/act_part.h5", custom_objects={'BasicBlock': BasicBlock})
             # self.act_model.add(self.shared_model)
             self.act_model.add(self.private_act_model)
-            
+
         if os.path.exists("./model/move_part.h5"):
             print("load move model")
             self.move_model = models.Sequential()
@@ -84,13 +84,13 @@ class Model:
             # self.move_model.add(self.shared_model)
             self.move_model.add(self.private_move_model)
 
-        
-        
-        
 
-        
-        
-        
+
+
+
+
+
+
 
     def save_mode(self):
         print("save model")
@@ -113,7 +113,7 @@ class Model:
 
        # ------------------ build evaluate_net ------------------
 
-       
+
         self.shared_model = models.Sequential()
         self.private_act_model = models.Sequential()
         self.private_move_model = models.Sequential()
@@ -124,7 +124,7 @@ class Model:
         # # self.shared_model.add(BatchNormalization(name='b1'))
         # self.shared_model.add(Activation('relu'))
         # self.shared_model.add(MaxPooling3D(pool_size=(2,2,2), strides=1, padding="VALID", name='p1'))
-        
+
         # # resnet blocks
         # self.shared_model.add(self.build_resblock(64, 2, name='Resnet_1'))
         # self.shared_model.add(self.build_resblock(80, 2, name='Resnet_2', stride=2))
@@ -152,7 +152,7 @@ class Model:
         self.act_model = models.Sequential()
         # self.act_model.add(self.shared_model)
         self.act_model.add(self.private_act_model)
- 
+
 
         # output layer for move model
         self.private_move_model.add(Conv3D(32, (2,3,3),strides=(1,2,2), input_shape=self.input_shape, name='conv1'))
@@ -163,7 +163,7 @@ class Model:
         self.private_move_model.add(Activation('relu'))
         self.private_move_model.add(Lambda(lambda x:tf.reduce_sum(x, 1)))
         # self.private_move_model.add(MaxPooling3D(pool_size=(2,2,2), strides=1, padding="VALID", name='p1'))
-        
+
         # resnet blocks
         self.private_move_model.add(self.build_resblock(64, 2, name='Resnet_1'))
         self.private_move_model.add(self.build_resblock(96, 2, name='Resnet_2', stride=2))
@@ -184,14 +184,14 @@ class Model:
 
     #     # ------------------ build target_model ------------------
     #    # shared part
-       
+
     #     self.shared_target_model = models.Sequential()
     #     # pre-process block
     #     self.shared_target_model.add(Conv3D(64, (2,3,3),strides=(1,2,2), input_shape=self.input_shape, name='conv1'))
     #     self.shared_target_model.add(BatchNormalization(name='b1'))
     #     self.shared_target_model.add(Activation('relu'))
     #     self.shared_target_model.add(MaxPooling3D(pool_size=(2,2,2), strides=1, padding="VALID", name='p1'))
-        
+
     #     # resnet blocks
     #     self.shared_target_model.add(self.build_resblock(64, 2, name='Resnet_1'))
     #     self.shared_target_model.add(self.build_resblock(80, 2, name='Resnet_2', stride=2))
@@ -209,7 +209,7 @@ class Model:
     #     self.act_target_model = models.Sequential()
     #     self.act_target_model.add(self.shared_target_model)
     #     self.act_target_model.add(self.private_act_target_model)
- 
+
 
     #     # output layer for move model
     #     self.private_move_target_model = models.Sequential()
@@ -226,7 +226,7 @@ class Model:
 
 
     def predict(self, input):
-        
+
         input = tf.expand_dims(input,axis=0)
         # shard_output = self.shared_model.predict(input)
         pred_move = self.private_move_model(input)
