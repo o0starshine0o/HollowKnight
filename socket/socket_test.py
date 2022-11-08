@@ -31,7 +31,7 @@ def pi(n):
         min_k = unit * i
         max_k = min_k + unit
         # 在Unix/Linux下，可以使用fork()调用实现多进程。
-        # 要实现跨平台的多进程，可以使用multiprocessing模块。
+        # 要实现跨平台的多进程，可以使用multiprocessing模块。Process
         # fork()调用一次，返回两次，因为操作系统自动把当前进程（称为父进程）复制了一份（称为子进程），然后，分别在父进程和子进程内返回。
         # 子进程永远返回0，而父进程返回子进程的ID。
         pid = os.fork()
@@ -51,8 +51,8 @@ def pi(n):
     sums = []
     for pid in child_process_ids:
         # accept是等待函数
-        conn, info = servsock.accept()  # 接收子进程连接, 因为是用的文件, 所以没有端口地址
-        print("info: ", info)
+        conn, address = servsock.accept()  # 接收子进程连接, 因为是用的文件, 所以没有端口地址
+        print("info: ", address)
         sums.append(struct.unpack('<f', conn.recv(1024))[0])  # recv收到的是bytes, 需要什么类型需要自己转换
         conn.close()  # 关闭连接
     for pid in child_process_ids:
