@@ -123,11 +123,25 @@
                   1. 可以先使用简单的数据结构, 等能够跑通了, 再上定义的协议, √
                   2. UnixDomainSocketEndPoint在空洞骑士上无法使用, 看看有木有替代方法, 不行就只能用ip了, ×
                   3. UnixDomainSocketEndPoint是新版本的内容, DebugMod用的是老版本, 所以只能用ip和端口了, √
+                  4. 能够连续输出数据, 目前卡在这了, 直接接收到一次数据
+                     1. 面向连接, 面向非连接
+                     2. 有阻止, 无阻止
          4. 通过Python读取socket, 恢复数据
             1. 读取数据, √
             2. 恢复数据
          5. 通过Python向HollowNight输入动作(左, 右, jump)
+            1. python怎么模拟键盘: https://www.ailibili.com/?p=560
+            2. Mac会拦截, 需要授予权限, √
+            3. pyautogui还有额外的功能: 屏幕快照, 可以考虑作为录制视频的工具, √
+            4. pyautogui怎么支持第二块屏幕
+               1. 使用工具后发现是x为负坐标
+            5. pyautogui在mac环境下不能获取window, 那就需要固定HollowKnight的串口位置
+            6. 尝试在游戏中完成移动, 跳跃的功能
          6. 能够完整的联调起来
+            1. 当进入到大黄蜂场景时, 开始接受数据, 给出操作
+            2. 当离开大黄蜂场景时, 执行脚本, 再次开始操作
+            3. 如何跳出循环?
+               1. 每局结束之后, 空出一段时间来结束python任务
          7. 使用DQN来训练
          8. 使用DQN来完成躲避boss
 5. 使用openCV
