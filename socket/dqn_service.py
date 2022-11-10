@@ -46,24 +46,29 @@ class Turing:
         while True:
             # 接收其他进程连接, 因为是用的文件, 所以没有端口地址
             connection, address = self.socket_service.accept()
-            # 收到的原始数据
-            origin_data = connection.recv(1024)
-            # 解析为string类型
-            string_data = origin_data.decode('utf-8')
-            print(string_data)
-            # 如果场景退出, 就结束本次AI过程
-            if string_data == 'GG_Workshop':
-                self.boss = False
-            # 如果进入了BOSS场景, 就开始AI操作
-            if string_data == 'GG_Hornet_2':
-                self.boss = True
-            # 如果在BOSS战, 就开始AI操作
-            if self.boss:
-                # 把得到的状态给DQN, 拿到action
-                action = self.dqn.get_action()
-                print("Turing take action: ", action, "for state: ")
-                # 把dqn计算得到的action给游戏
-                self.game.step(action)
+
+            while True:
+                # 收到的原始数据
+                origin_data = connection.recv(1024)
+                # 如果没有数据, 就断开连接
+                if not origin_data:
+                    break
+                # 解析为string类型
+                string_data = origin_data.decode('utf-8')
+                print(string_data)
+                # 如果场景退出, 就结束本次AI过程
+                if string_data == 'GG_Workshop':
+                    self.boss = False
+                # 如果进入了BOSS场景, 就开始AI操作
+                if string_data == 'GG_Hornet_2':
+                    self.boss = True
+                # 如果在BOSS战, 就开始AI操作
+                if self.boss:
+                    # 把得到的状态给DQN, 拿到action
+                    action = self.dqn.get_action()
+                    print("Turing take action: ", action, "for state: ")
+                    # 把dqn计算得到的action给游戏
+                    self.game.step(action)
 
 
 if __name__ == '__main__':
