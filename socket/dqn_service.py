@@ -80,13 +80,9 @@ class Agent:
         # 根据不同的batch_size, 这里会返回多个选取的动作
         # 因为输入的batch_size是1, 这里输出的shape就是(1, 4)
         prediction = self.__get_prediction__(state)
-        # print("get_action: ", prediction)
         return prediction[0].numpy().argmax()
-        # action_index = prediction[0].numpy().argmax()
-        # return action_index
-        # return self.actions[action_index]
         # 先返回一个随机的动作, 之后再补上DQN网络的动作
-        # return random.randint(0, len(self.actions))
+        return random.randint(0, len(self.actions) - 1)
 
     def learn(self, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, next_states: np.ndarray, gamma=0.99):
         """ 模型更新, 根据贝尔曼方程, 求梯度, 更新网络
