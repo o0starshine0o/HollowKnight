@@ -14,7 +14,52 @@ from tensorflow.python.keras.optimizer_v2.adam import Adam
 from DQN_HollowKnight.Tool.data_helper import parse_data
 
 
-class DQN:
+class Knight:
+    def __init__(self):
+        self.hp = 9
+
+
+class Boss:
+    def __init__(self):
+        self.hp = 999
+
+
+class Pool:
+
+    def __init__(self, size: int = 60 * 60):
+        self.size = size
+        self.current = 0
+        self.count = 0
+        self.states = np.empty((self.size, 32))
+        self.actions = np.empty(self.size, dtype=int)
+        self.rewards = np.zeros(self.size)
+
+    def record(self, state: np.ndarray, action: int, reward: float):
+        self.states[self.current] = state
+        self.actions[self.current] = action
+        # reward 为上一步的action的奖励, 所以往上推一步
+        self.rewards[self.current - 1] = reward
+        self.current += 1
+        self.count = max(self.count, self.current)
+        self.current %= self.size
+
+    def recall(self, size: int) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+        """
+        Returns:
+            states: 选取的状态S0
+            actions: 此状态下选取的动作A0
+            rewards: 选取动作的奖励R0
+            next_states: 到达的下一个状态S1
+        """
+        if self.count < size:
+            print('size < count', 'not enough data')
+            return None, None, None, None
+        indices = np.array(random.sample(range(self.count), size))
+        next_indices = (indices + 1) % self.count
+        return self.states[indices], self.actions[indices], self.rewards[indices], self.states[next_indices]
+
+
+class Agent:
 
     def __init__(self, input_size: int, batch_size: int = 1, learning_rate: float = 0.001):
         self.actions = [None, 'a', 'd', 'j', 'k']
@@ -29,14 +74,49 @@ class DQN:
         return model
 
     def get_action(self, state: np.ndarray):
+        """
+        返回一个action的索引
+        """
         # 根据不同的batch_size, 这里会返回多个选取的动作
         # 因为输入的batch_size是1, 这里输出的shape就是(1, 4)
         prediction = self.__get_prediction__(state)
         # print("get_action: ", prediction)
-        action_index = prediction[0].numpy().argmax()
+        return prediction[0].numpy().argmax()
+        # action_index = prediction[0].numpy().argmax()
+        # return action_index
         # return self.actions[action_index]
         # 先返回一个随机的动作, 之后再补上DQN网络的动作
-        return random.choice(self.actions)
+        # return random.randint(0, len(self.actions))
+
+    def learn(self, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, next_states: np.ndarray, gamma=0.99):
+        """ 模型更新, 根据贝尔曼方程, 求梯度, 更新网络
+        """
+        if states is None or actions is None or rewards is None or next_states is None:
+            return
+
+        # 1, 根据当前网络, 计算next_states下所有action的value, 并且选取价值最大的那个动作的值, 作为next_q_max
+        # next_actions_value_max = max(Q(S_1, W)), shape: (32, )
+        next_actions_value_max = self.__get_prediction__(next_states).numpy().max(axis=1)
+        # 2, 添加gamma, reward作为target_q
+        # target_q = R_0 + gamma * next_q_max, shape: (32, )
+        target_q = rewards + gamma * next_actions_value_max
+        with tf.GradientTape() as tape:
+            # 3, 根据当前网络, 重新计算states下所有actions的value
+            # action_values = Q(S0, W), shape: (32, 5)
+            action_values = self.__get_prediction__(states)
+            # 当时选中的action, 转换为one_hot, shape: (32, 5)
+            one_hot_actions = tf.keras.utils.to_categorical(actions, len(self.actions))
+            # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
+            q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
+            # 4, 使用2者的MSE作为loss
+            # loss = (target_q - q)^2
+            loss = self.model.loss(target_q, q)
+            # 5, 计算梯度
+            model_gradients = tape.gradient(loss, self.model.trainable_variables)
+        # 6, 反向传播, 更新model的参数
+        self.model.optimizer.apply_gradients(zip(model_gradients, self.model.trainable_variables))
+        # 不解释
+        print('good good study, day day up', loss)
 
     @tf.function
     def __get_prediction__(self, state: np.ndarray):
@@ -57,9 +137,12 @@ class Game:
 class Turing:
     _time_format = '%m/%d/%Y %I:%M:%S %p.%f'
 
-    def __init__(self, game: Game, dqn: DQN):
+    def __init__(self, game: Game, agent: Agent, pool: Pool, knight: Knight, boss: Boss):
         self.game = game
-        self.dqn = dqn
+        self.agent = agent
+        self.pool = pool
+        self.knight = knight
+        self.boss = boss
         # 配置socket
         self.socket_service = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # 绑定socket文件
@@ -119,8 +202,12 @@ class Turing:
             case 'GG_Hornet_2':
                 match json_data['scene']:
                     case 'GG_Hornet_2':
-                        action = self._fight_boss(json_data['knight_points'], json_data['enemy_points'])
-                        print(receive_time, "Turing take action:", action, "for state:")
+                        state, action_index = self._fight_boss(json_data['knight_points'], json_data['enemy_points'])
+                        # todo: 这里模拟了boss血量的丢失, 实际上是需要结合游戏数据和本地数据计算得到
+                        reward = 1.0 if random.random() > 0.95 else 0.0
+                        self.pool.record(state, action_index, reward)
+                        print(receive_time, "Turing get", reward, "with action:", self.agent.actions[action_index],
+                              "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
         return json_data['scene']
@@ -130,14 +217,28 @@ class Turing:
         """
         self.boss_start = time
         self.delay_time = []
+        self.knight.hp = 9
+        self.boss.hp = 999
 
-    def _fight_boss(self, knight: list[float], enemies: list[list[float]]):
+    def _fight_boss(self, knight: [float], positions: list[list[float]]):
+        """
+        knight的坐标, 长度为4, [left, top, right, bottom]
+        enemies的坐标, 目前有5个, 先固定分配位置, 第二维长度为4, [left, top, right, bottom]
+        """
+        # 把list转换为ndarray
+        positions.insert(0, knight)
+        # 调整形状: (n,)
+        state_flatten = np.array(positions).flatten()
+        # (32,)
+        state_fixed = np.pad(state_flatten, (0, 32 - len(state_flatten)))
+        # (1, 32)
+        state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
-        action = self.dqn.get_action(np.full(shape=(1, 32), fill_value=random.random()))
+        action_index = self.agent.get_action(state_reshape)
         # 把dqn计算得到的action给游戏
-        self.game.step(action)
+        self.game.step(self.agent.actions[action_index])
 
-        return action
+        return state_fixed, action_index
 
     def _end_boss(self, end_time: datetime):
         """ 离开BOSS场景, 需要统计一些操作
@@ -148,7 +249,10 @@ class Turing:
         if len(self.delay_time) > 0:
             average_time_delay = np.mean(list(map(lambda delay: delay.total_seconds(), self.delay_time)))
             print("Average time delay:", average_time_delay * 1000, "ms")
+        # 开始学习
+        states, actions, rewards, next_states = self.pool.recall(32)
+        self.agent.learn(states, actions, rewards, next_states)
 
 
 if __name__ == '__main__':
-    Turing(Game(), DQN(32, 1)).start()
+    Turing(Game(), Agent(32, 1), Pool(), Knight(), Boss()).start()
