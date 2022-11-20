@@ -1,6 +1,8 @@
 # coding: utf-8
+import _thread
 import random
 import socket
+import time
 from datetime import datetime
 
 import numpy as np
@@ -137,6 +139,28 @@ class Game:
             return
         pyautogui.press(action)
 
+    def challenge(self):
+        _thread.start_new_thread(self._challenge, ())
+        pass
+
+    def _challenge(self):
+        # 允许其他操作来打断无限循环
+        time.sleep(5)
+        # 给一个动作, 让Knight醒来
+        pyautogui.press('a')
+        time.sleep(2)
+        # 走到雕像面前
+        pyautogui.press('a')
+        time.sleep(0.1)
+        pyautogui.press('a')
+        time.sleep(0.1)
+        # 打开挑战面板
+        pyautogui.press('w')
+        time.sleep(1)
+        # 选择挑战开始
+        pyautogui.press('k')
+        time.sleep(1)
+
 
 class Turing:
     _time_format = '%m/%d/%Y %I:%M:%S %p.%f'
@@ -209,7 +233,7 @@ class Turing:
                         pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
                         state, action_index = self._fight_boss(json_data['knight_points'], json_data['enemy_points'])
                         self.pool.record(state, action_index, pre_reward)
-                        if pre_reward != 0:
+                        if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
                                   "with action:", self.agent.actions[action_index],
                                   "for state:")
@@ -271,6 +295,8 @@ class Turing:
         # 开始学习
         states, actions, rewards, next_states = self.pool.recall(32)
         self.agent.learn(states, actions, rewards, next_states)
+        # 准备下一场挑战
+        self.game.challenge()
 
 
 if __name__ == '__main__':
