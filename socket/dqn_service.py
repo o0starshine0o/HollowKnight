@@ -18,10 +18,18 @@ class Knight:
     def __init__(self):
         self.hp = 9
 
+    def reset(self):
+        self.hp = 9
+
 
 class Boss:
-    def __init__(self):
-        self.hp = 999
+    def __init__(self, name='Hornet Boss 2'):
+        self.hp = 800
+        self.name = name
+
+    def reset(self, name='Hornet Boss 2'):
+        self.hp = 800
+        self.name = name
 
 
 class Pool:
@@ -82,7 +90,7 @@ class Agent:
         prediction = self.__get_prediction__(state)
         return prediction[0].numpy().argmax()
         # 先返回一个随机的动作, 之后再补上DQN网络的动作
-        return random.randint(0, len(self.actions) - 1)
+        # return random.randint(0, len(self.actions) - 1)
 
     def learn(self, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, next_states: np.ndarray, gamma=0.99):
         """ 模型更新, 根据贝尔曼方程, 求梯度, 更新网络
@@ -198,12 +206,13 @@ class Turing:
             case 'GG_Hornet_2':
                 match json_data['scene']:
                     case 'GG_Hornet_2':
+                        pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
                         state, action_index = self._fight_boss(json_data['knight_points'], json_data['enemy_points'])
-                        # todo: 这里模拟了boss血量的丢失, 实际上是需要结合游戏数据和本地数据计算得到
-                        reward = 1.0 if random.random() > 0.95 else 0.0
-                        self.pool.record(state, action_index, reward)
-                        print(receive_time, "Turing get", reward, "with action:", self.agent.actions[action_index],
-                              "for state:")
+                        self.pool.record(state, action_index, pre_reward)
+                        if pre_reward != 0:
+                            print(receive_time, "Turing get", pre_reward,
+                                  "with action:", self.agent.actions[action_index],
+                                  "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
         return json_data['scene']
@@ -213,12 +222,26 @@ class Turing:
         """
         self.boss_start = time
         self.delay_time = []
-        self.knight.hp = 9
-        self.boss.hp = 999
+        self.knight.reset()
+        self.boss.reset()
+
+    def _get_reward(self, hp: int, enemies: list):
+        """ 先获取到奖励
+        """
+        # knight 生命计算
+        reward = -10 * (self.knight.hp - hp)
+        self.knight.hp = hp
+        # boss 生命计算
+        if len(enemies) > 0:
+            enemy = next(enemy for enemy in enemies if enemy['name'] == self.boss.name)
+            if enemy:
+                reward += (self.boss.hp - enemy['hp'])
+                self.boss.hp = enemy['hp']
+        # 综合奖励
+        return reward
 
     def _fight_boss(self, knight: [float], positions: list[list[float]]):
-        """
-        knight的坐标, 长度为4, [left, top, right, bottom]
+        """ knight的坐标, 长度为4, [left, top, right, bottom]
         enemies的坐标, 目前有5个, 先固定分配位置, 第二维长度为4, [left, top, right, bottom]
         """
         # 把list转换为ndarray
