@@ -1,7 +1,9 @@
 # coding: utf-8
 import _thread
+import os
 import random
 import socket
+import sys
 import time
 from datetime import datetime
 
@@ -36,13 +38,20 @@ class Boss:
 
 class Pool:
 
-    def __init__(self, size: int = 60 * 60):
+    def __init__(self, save_path: str = None, size: int = 60 * 60):
         self.size = size
-        self.current = 0
-        self.count = 0
-        self.states = np.empty((self.size, 32))
-        self.actions = np.empty(self.size, dtype=int)
-        self.rewards = np.zeros(self.size)
+        if self.__file_exist(save_path):
+            self.states = np.load(save_path + '/states.npy')
+            self.actions = np.load(save_path + '/actions.npy')
+            self.rewards = np.load(save_path + '/rewards.npy')
+            self.current, self.count = tuple(np.load(save_path + '/meta.npy'))
+            print(f'load pool:[{self.current}|{self.count}]', save_path)
+        else:
+            self.states = np.empty((self.size, 32))
+            self.actions = np.empty(self.size, dtype=int)
+            self.rewards = np.zeros(self.size)
+            self.current = 0
+            self.count = 0
 
     def record(self, state: np.ndarray, action: int, reward: float):
         self.states[self.current] = state
@@ -68,12 +77,31 @@ class Pool:
         next_indices = (indices + 1) % self.count
         return self.states[indices], self.actions[indices], self.rewards[indices], self.states[next_indices]
 
+    def save(self, save_path: str):
+        if save_path and os.path.exists(save_path):
+            np.save(save_path + '/states.npy', self.states)
+            np.save(save_path + '/actions.npy', self.actions)
+            np.save(save_path + '/rewards.npy', self.rewards)
+            np.save(save_path + '/meta.npy', np.array([self.current, self.count]))
+            print(f'save pool:[{self.current}|{self.count}]', save_path)
+
+    def __file_exist(self, save_path: str = None) -> bool:
+        return save_path \
+               and os.path.exists(save_path + '/states.npy') \
+               and os.path.exists(save_path + '/actions.npy') \
+               and os.path.exists(save_path + '/rewards.npy') \
+               and os.path.exists(save_path + '/meta.npy')
+
 
 class Agent:
 
-    def __init__(self, input_size: int, batch_size: int = 1, learning_rate: float = 0.001):
+    def __init__(self, save_path: str = None, input_size: int = 32, batch_size: int = 1, learning_rate: float = 0.001):
         self.actions = [None, 'a', 'd', 'j', 'k']
-        self.model = self.__build_deep_q_network__(Input((input_size,), batch_size), learning_rate)
+        if save_path and os.path.exists(save_path):
+            self.model = tf.keras.models.load_model(save_path + '/model.tf')
+            print(f'load model:', save_path + '/model.tf')
+        else:
+            self.model = self.__build_deep_q_network__(Input((input_size,), batch_size), learning_rate)
 
     def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.001):
         x = Dense(128)(input_layer)
@@ -123,6 +151,11 @@ class Agent:
         self.model.optimizer.apply_gradients(zip(model_gradients, self.model.trainable_variables))
         # 不解释
         print('good good study, day day up', loss)
+
+    def save(self, save_path: str):
+        if save_path and os.path.exists(save_path):
+            self.model.save(save_path + '/model.tf')
+            print('save model:', save_path + '/model.tf')
 
     @tf.function
     def __get_prediction__(self, state: np.ndarray):
@@ -186,8 +219,23 @@ class Turing:
 
     def start(self):
         # 使用一个死循环, 不断的接受客户端的消息
-        while True:
-            self._game_start()
+        try:
+            while True:
+                self._game_start()
+        except KeyboardInterrupt:
+            print('end')
+        finally:
+            # 保存当前记录
+            self.save()
+
+    def save(self, time_format='%m-%d_%H:%M:%S'):
+        # Create the folder for saving the agent
+        save_path = 'save/' + datetime.now().strftime(time_format)
+        if not os.path.isdir(save_path):
+            os.makedirs(save_path)
+        # 保存接下来的数据
+        self.agent.save(save_path)
+        self.pool.save(save_path)
 
     def _game_start(self):
         # 接收其他进程连接
@@ -241,10 +289,10 @@ class Turing:
                         self._end_boss(receive_time)
         return json_data['scene']
 
-    def _before_boss(self, time: datetime):
+    def _before_boss(self, start_time: datetime):
         """ 进入BOSS场景, 需要初始化一些操作
         """
-        self.boss_start = time
+        self.boss_start = start_time
         self.delay_time = []
         self.knight.reset()
         self.boss.reset()
@@ -300,4 +348,4 @@ class Turing:
 
 
 if __name__ == '__main__':
-    Turing(Game(), Agent(32, 1), Pool(), Knight(), Boss()).start()
+    Turing(Game(), Agent('save/' + sys.argv[1], 32, 1), Pool('save/' + sys.argv[1]), Knight(), Boss()).start()
