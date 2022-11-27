@@ -38,14 +38,14 @@ class Boss:
 
 class Pool:
 
-    def __init__(self, save_path: str = None, size: int = 60 * 60):
+    def __init__(self, save_path: str = None, size: int = 10 * 60 * 60):
         self.size = size
         if self.__file_exist(save_path):
             self.states = np.load(save_path + '/states.npy')
             self.actions = np.load(save_path + '/actions.npy')
             self.rewards = np.load(save_path + '/rewards.npy')
-            self.current, self.count = tuple(np.load(save_path + '/meta.npy'))
-            print(f'load pool:[{self.current}|{self.count}]', save_path)
+            self.current, self.count, size = tuple(np.load(save_path + '/meta.npy'))
+            print(f'load pool:[{self.current}|{self.count}|{size}]', save_path)
         else:
             self.states = np.empty((self.size, 32))
             self.actions = np.empty(self.size, dtype=int)
@@ -82,8 +82,8 @@ class Pool:
             np.save(save_path + '/states.npy', self.states)
             np.save(save_path + '/actions.npy', self.actions)
             np.save(save_path + '/rewards.npy', self.rewards)
-            np.save(save_path + '/meta.npy', np.array([self.current, self.count]))
-            print(f'save pool:[{self.current}|{self.count}]', save_path)
+            np.save(save_path + '/meta.npy', np.array([self.current, self.count, self.size]))
+            print(f'save pool: {save_path} [{self.current}|{self.count}|{self.size}]')
 
     def __file_exist(self, save_path: str = None) -> bool:
         return save_path \
@@ -95,15 +95,15 @@ class Pool:
 
 class Agent:
 
-    def __init__(self, save_path: str = None, input_size: int = 32, batch_size: int = 1, learning_rate: float = 0.001):
+    def __init__(self, save_path: str = None, input_size: int = 32, learning_rate: float = 0.01):
         self.actions = [None, 'a', 'd', 'j', 'k']
         if save_path and os.path.exists(save_path):
             self.model = tf.keras.models.load_model(save_path + '/model.tf')
             print(f'load model:', save_path + '/model.tf')
         else:
-            self.model = self.__build_deep_q_network__(Input((input_size,), batch_size), learning_rate)
+            self.model = self.__build_deep_q_network__(Input(input_size), learning_rate)
 
-    def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.001):
+    def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.01):
         x = Dense(128)(input_layer)
         x = Flatten()(x)
         output_layer = Dense(len(self.actions), softmax)(x)
@@ -111,44 +111,50 @@ class Agent:
         model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
         return model
 
-    def get_action(self, state: np.ndarray):
+    def get_action(self, state: np.ndarray, is_random=False):
         """
         返回一个action的索引
         """
+        # 经验池比较小, 采取随机操作, 增大经验池
+        if is_random:
+            return random.randint(0, len(self.actions) - 1), is_random
         # 根据不同的batch_size, 这里会返回多个选取的动作
         # 因为输入的batch_size是1, 这里输出的shape就是(1, 4)
         prediction = self.__get_prediction__(state)
-        return prediction[0].numpy().argmax()
-        # 先返回一个随机的动作, 之后再补上DQN网络的动作
-        # return random.randint(0, len(self.actions) - 1)
+        return prediction[0].numpy().argmax(), is_random
 
-    def learn(self, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, next_states: np.ndarray, gamma=0.99):
+    def learn(self, pool: Pool, gamma=0.99):
         """ 模型更新, 根据贝尔曼方程, 求梯度, 更新网络
         """
-        if states is None or actions is None or rewards is None or next_states is None:
-            return
+        _thread.start_new_thread(self._learn, (pool, gamma))
 
-        # 1, 根据当前网络, 计算next_states下所有action的value, 并且选取价值最大的那个动作的值, 作为next_q_max
-        # next_actions_value_max = max(Q(S_1, W)), shape: (32, )
-        next_actions_value_max = self.__get_prediction__(next_states).numpy().max(axis=1)
-        # 2, 添加gamma, reward作为target_q
-        # target_q = R_0 + gamma * next_q_max, shape: (32, )
-        target_q = rewards + gamma * next_actions_value_max
-        with tf.GradientTape() as tape:
-            # 3, 根据当前网络, 重新计算states下所有actions的value
-            # action_values = Q(S0, W), shape: (32, 5)
-            action_values = self.__get_prediction__(states)
-            # 当时选中的action, 转换为one_hot, shape: (32, 5)
-            one_hot_actions = tf.keras.utils.to_categorical(actions, len(self.actions))
-            # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
-            q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
-            # 4, 使用2者的MSE作为loss
-            # loss = (target_q - q)^2
-            loss = self.model.loss(target_q, q)
-            # 5, 计算梯度
-            model_gradients = tape.gradient(loss, self.model.trainable_variables)
-        # 6, 反向传播, 更新model的参数
-        self.model.optimizer.apply_gradients(zip(model_gradients, self.model.trainable_variables))
+    def _learn(self, pool: Pool, gamma=0.99, batch_size=32, epoch=32):
+        for _ in range(epoch):
+            states, actions, rewards, next_states = pool.recall(batch_size)
+            if states is None or actions is None or rewards is None or next_states is None:
+                return
+
+            # 1, 根据当前网络, 计算next_states下所有action的value, 并且选取价值最大的那个动作的值, 作为next_q_max
+            # next_actions_value_max = max(Q(S_1, W)), shape: (32, )
+            next_actions_value_max = self.__get_prediction__(next_states).numpy().max(axis=1)
+            # 2, 添加gamma, reward作为target_q
+            # target_q = R_0 + gamma * next_q_max, shape: (32, )
+            target_q = rewards + gamma * next_actions_value_max
+            with tf.GradientTape() as tape:
+                # 3, 根据当前网络, 重新计算states下所有actions的value
+                # action_values = Q(S0, W), shape: (32, 5)
+                action_values = self.__get_prediction__(states)
+                # 当时选中的action, 转换为one_hot, shape: (32, 5)
+                one_hot_actions = tf.keras.utils.to_categorical(actions, len(self.actions))
+                # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
+                q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
+                # 4, 使用2者的MSE作为loss
+                # loss = (target_q - q)^2
+                loss = self.model.loss(target_q, q)
+                # 5, 计算梯度
+                model_gradients = tape.gradient(loss, self.model.trainable_variables)
+            # 6, 反向传播, 更新model的参数
+            self.model.optimizer.apply_gradients(zip(model_gradients, self.model.trainable_variables))
         # 不解释
         print('good good study, day day up', loss)
 
@@ -224,9 +230,6 @@ class Turing:
                 self._game_start()
         except KeyboardInterrupt:
             print('end')
-        finally:
-            # 保存当前记录
-            self.save()
 
     def save(self, time_format='%m-%d_%H:%M:%S'):
         # Create the folder for saving the agent
@@ -251,13 +254,16 @@ class Turing:
                 if not origin_data:
                     break
                 # 处理当前帧
-                scene = self._frame_start(origin_data, scene)
+                scene = self._frame_current(origin_data, scene)
                 # 反馈给客户端
                 connection.send(str.encode(datetime.now().strftime(self._time_format)[:-3]))
             except ConnectionResetError as exception:
                 print(exception)
 
-    def _frame_start(self, origin_data: bytes, scene: str):
+        # 保存当前记录
+        self.save()
+
+    def _frame_current(self, origin_data: bytes, scene: str):
         # 记录日志
         receive_time = datetime.now()
         # 保存为字典类型
@@ -279,11 +285,15 @@ class Turing:
                 match json_data['scene']:
                     case 'GG_Hornet_2':
                         pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
-                        state, action_index = self._fight_boss(json_data['knight_points'], json_data['enemy_points'])
+                        knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
+                        state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
+                        # todo: delete, 验证模型可学习
+                        if self.agent.actions[action_index] == 'k':
+                            pre_reward = 1
                         self.pool.record(state, action_index, pre_reward)
                         if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
-                                  "with action:", self.agent.actions[action_index],
+                                  "with random:" if is_random else "with action:", self.agent.actions[action_index],
                                   "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
@@ -325,11 +335,11 @@ class Turing:
         # (1, 32)
         state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
-        action_index = self.agent.get_action(state_reshape)
+        action_index, is_random = self.agent.get_action(state_reshape, self.pool.current < self.pool.size / 2)
         # 把dqn计算得到的action给游戏
         self.game.step(self.agent.actions[action_index])
 
-        return state_fixed, action_index
+        return state_fixed, action_index, is_random
 
     def _end_boss(self, end_time: datetime):
         """ 离开BOSS场景, 需要统计一些操作
@@ -341,11 +351,10 @@ class Turing:
             average_time_delay = np.mean(list(map(lambda delay: delay.total_seconds(), self.delay_time)))
             print("Average time delay:", average_time_delay * 1000, "ms")
         # 开始学习
-        states, actions, rewards, next_states = self.pool.recall(32)
-        self.agent.learn(states, actions, rewards, next_states)
+        self.agent.learn(self.pool)
         # 准备下一场挑战
         self.game.challenge()
 
 
 if __name__ == '__main__':
-    Turing(Game(), Agent('save/' + sys.argv[1], 32, 1), Pool('save/' + sys.argv[1]), Knight(), Boss()).start()
+    Turing(Game(), Agent('save/' + sys.argv[1], 32), Pool('save/' + sys.argv[1]), Knight(), Boss()).start()
