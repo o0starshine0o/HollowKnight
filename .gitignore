@@ -12,6 +12,7 @@
 /ce_ptr/
 /CE/
 */save
+*/log
 *.png
 *.jpg
 *.pyc
