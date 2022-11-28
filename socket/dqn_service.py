@@ -10,7 +10,7 @@ from datetime import datetime
 import numpy as np
 import pyautogui
 import tensorflow as tf
-from tensorflow.python.keras.activations import softmax
+from tensorflow.python.keras.activations import relu
 from tensorflow.python.keras.layers import Dense, Flatten, Input
 from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
@@ -106,15 +106,15 @@ class Agent:
         self.learn_thread = _thread.start_new_thread(self._learn, (gamma, batch_size))
 
     def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.01):
-        hidden = Dense(128)(input_layer)
-        hidden = Dense(256)(hidden)
-        hidden = Dense(512)(hidden)
-        hidden = Dense(1024)(hidden)
-        hidden = Dense(2048)(hidden)
-        hidden = Dense(256)(hidden)
-        hidden = Dense(32)(hidden)
+        hidden = Dense(128, relu)(input_layer)
+        hidden = Dense(256, relu)(hidden)
+        hidden = Dense(512, relu)(hidden)
+        hidden = Dense(1024, relu)(hidden)
+        hidden = Dense(2048, relu)(hidden)
+        hidden = Dense(256, relu)(hidden)
+        hidden = Dense(32, relu)(hidden)
         flatten = Flatten()(hidden)
-        output_layer = Dense(len(self.actions), softmax)(flatten)
+        output_layer = Dense(len(self.actions))(flatten)
         model = Model(input_layer, output_layer)
         model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
         return model
@@ -179,13 +179,13 @@ class Agent:
             one_hot_actions = tf.keras.utils.to_categorical(actions, len(self.actions))
             # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
             q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
-            # 4, 使用2者的MSE作为loss
+            # 4, 使用2者的MSE作为loss(差值小于1), 否则使用绝对值(差值大于1)
             # loss = (target_q - q)^2
             loss = self.model.loss(target_q, q)
-            # 5, 计算梯度
-            model_gradients = tape.gradient(loss, self.model.trainable_variables)
+            # 5, 计算梯度, 结果是一个list, 记录了每一层, 每一个cell需要下降的梯度
+            gradients = tape.gradient(loss, self.model.trainable_variables)
         # 6, 反向传播, 更新model的参数
-        self.model.optimizer.apply_gradients(zip(model_gradients, self.model.trainable_variables))
+        self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         return loss
 
