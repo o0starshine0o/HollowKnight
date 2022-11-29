@@ -127,7 +127,7 @@ class Agent:
         prediction = self.__get_prediction__(state)
         return prediction[0].numpy().argmax(), is_random
 
-    def _learn(self, gamma=0.99, batch_size=32, empty_sleep_time=1):
+    def _learn(self, gamma=0.99, batch_size=32, empty_sleep_time=10):
         step = 0
         start = datetime.now()
         writer = tf.summary.create_file_writer('log')
