@@ -95,7 +95,7 @@ class Pool:
 
 class Agent:
 
-    def __init__(self, save_path: str = None, input_size=32, gamma=0.99, learning_rate=0.01, batch_size=32):
+    def __init__(self, save_path: str = None, input_size=32, gamma=0.99, learning_rate=0.001, batch_size=32):
         self.actions = [None, 'a', 'd', 'j', 'k']
         if save_path and os.path.exists(save_path):
             self.model = tf.keras.models.load_model(save_path + '/model.tf')
@@ -105,14 +105,10 @@ class Agent:
         # 程序启动就开始学习, 生命不停, 学习不止
         self.learn_thread = _thread.start_new_thread(self._learn, (gamma, batch_size))
 
-    def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.01):
-        hidden = Dense(128, relu)(input_layer)
-        hidden = Dense(256, relu)(hidden)
-        hidden = Dense(512, relu)(hidden)
-        hidden = Dense(1024, relu)(hidden)
+    def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.001):
+        hidden = Dense(256, relu)(input_layer)
         hidden = Dense(2048, relu)(hidden)
-        hidden = Dense(256, relu)(hidden)
-        hidden = Dense(32, relu)(hidden)
+        hidden = Dense(128, relu)(hidden)
         flatten = Flatten()(hidden)
         output_layer = Dense(len(self.actions))(flatten)
         model = Model(input_layer, output_layer)
@@ -150,13 +146,13 @@ class Agent:
                     step += 1
 
                     # 保存损失信息
-                    if step % 100 == 0:
+                    if step % 1000 == 0:
                         print(f'step: {step}, loss {loss.numpy()}')
                         tf.summary.scalar('loss', loss.numpy(), step)
                         writer.flush()
 
                     # 输出一些信息表明线程正常运行
-                    if step % 1000 == 0:
+                    if step % 10000 == 0:
                         # 不解释
                         print(f'good good study, day day up {datetime.now() - start}')
                         start = datetime.now()
