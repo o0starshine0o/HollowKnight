@@ -360,7 +360,7 @@ class Turing:
         # (1, 32)
         state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
-        action_index, is_random = agent.get_action(state_reshape, pool.current < pool.size / 2)
+        action_index, is_random = agent.get_action(state_reshape, pool.count < pool.size / 2)
         # 把dqn计算得到的action给游戏
         game.step(agent.actions[action_index])
 
