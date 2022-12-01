@@ -1,5 +1,6 @@
 # coding: utf-8
 import _thread
+import json
 import os
 import random
 import socket
@@ -21,9 +22,12 @@ from DQN_HollowKnight.Tool.data_helper import parse_data
 class Knight:
     def __init__(self):
         self.hp = 9
+        # 记录每个动作的价值
+        self.actions = []
 
     def reset(self):
         self.hp = 9
+        self.actions = []
 
 
 class Boss:
@@ -96,7 +100,6 @@ class Pool:
 class Agent:
 
     def __init__(self, save_path: str = None, input_size=32, gamma=0.99, learning_rate=0.001, batch_size=32):
-        self.actions = [None, 'a', 'd', 'j', 'k']
         if save_path and os.path.exists(save_path):
             self.model = tf.keras.models.load_model(save_path + '/model.tf')
             print(f'load model:', save_path + '/model.tf')
@@ -104,33 +107,44 @@ class Agent:
             self.model = self.__build_deep_q_network__(Input(input_size), learning_rate)
         # 程序启动就开始学习, 生命不停, 学习不止
         self.learn_thread = _thread.start_new_thread(self._learn, (gamma, batch_size))
+        self.loss = sys.maxsize
 
     def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.001):
         hidden = Dense(256, relu)(input_layer)
         hidden = Dense(2048, relu)(hidden)
         hidden = Dense(128, relu)(hidden)
         flatten = Flatten()(hidden)
-        output_layer = Dense(len(self.actions))(flatten)
+        output_layer = Dense(len(game.actions))(flatten)
         model = Model(input_layer, output_layer)
         model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
         return model
 
-    def get_action(self, state: np.ndarray, is_random=False):
+    def get_action(self, state: np.ndarray, is_random=False, fight_count=0):
         """
         返回一个action的索引
         """
         # 经验池比较小, 采取随机操作, 增大经验池
         if is_random:
-            return random.randint(0, len(self.actions) - 1), is_random
-        # 根据不同的batch_size, 这里会返回多个选取的动作
-        # 因为输入的batch_size是1, 这里输出的shape就是(1, 4)
-        prediction = self.__get_prediction__(state)
-        return prediction[0].numpy().argmax(), is_random
+            action_index = random.randint(0, len(game.actions) - 1)
+            knight.actions.append([1 if i == action_index else 0 for i in range(len(game.actions))])
+        else:
+            prediction = self.__get_prediction__(state)[0].numpy()
+            knight.actions.append(map(str, prediction))
+            action_index = prediction.argmax()
+        # 记录每一个动作的价值
+        with tf.name_scope(f"fight_count[{fight_count}]"):
+            action_value = dict(zip(game.actions, knight.actions[-1]))
+            tf.summary.text('action values', json.dumps(action_value), len(knight.actions))
+        writer.flush()
+
+        return action_index, is_random
 
     def _learn(self, gamma=0.99, batch_size=32, empty_sleep_time=10):
+        """
+        这是一个线程函数, 用到write需要单独再创建
+        """
         step = 0
         start = datetime.now()
-        writer = tf.summary.create_file_writer('log')
         try:
             with writer.as_default():
                 while True:
@@ -141,20 +155,19 @@ class Agent:
                         continue
 
                     # 核心梯度下降过程
-                    loss = self._learn_kernel(states, actions, rewards, next_states, gamma)
+                    self.loss = self._learn_kernel(states, actions, rewards, next_states, gamma).numpy()
 
                     step += 1
 
                     # 保存损失信息
                     if step % 1000 == 0:
-                        print(f'step: {step}, loss {loss.numpy()}')
-                        tf.summary.scalar('loss', loss.numpy(), step)
+                        tf.summary.scalar('loss', self.loss, step)
                         writer.flush()
 
                     # 输出一些信息表明线程正常运行
                     if step % 10000 == 0:
                         # 不解释
-                        print(f'good good study, day day up {datetime.now() - start}')
+                        print(f'good good study: {datetime.now() - start}, day day up {self.loss}')
                         start = datetime.now()
         except KeyboardInterrupt:
             writer.close()
@@ -172,7 +185,7 @@ class Agent:
             # action_values = Q(S0, W), shape: (32, 5)
             action_values = self.__get_prediction__(states)
             # 当时选中的action, 转换为one_hot, shape: (32, 5)
-            one_hot_actions = tf.keras.utils.to_categorical(actions, len(self.actions))
+            one_hot_actions = tf.keras.utils.to_categorical(actions, len(game.actions))
             # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
             q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
             # 4, 使用2者的MSE作为loss(差值小于1), 否则使用绝对值(差值大于1)
@@ -201,7 +214,8 @@ class Game:
     """
 
     def __init__(self):
-        pass
+        self.actions = [None, 'a', 'd', 'j', 'k']
+        self.len_actions = len(self.actions)
 
     def step(self, action: str):
         if action is None:
@@ -243,6 +257,8 @@ class Turing:
         self.socket_service.listen(10)
         # 记录进入BOSS的时间, 方便计算与BOSS战斗的时间
         self.boss_start = datetime.now()
+        # 记录本次turing与boss对战的次数
+        self.fight_count = 0
         # 记录下HollowKnight发送状态到收到动作的时间延迟
         self.delay_time = []
         # 不解释
@@ -251,16 +267,16 @@ class Turing:
     def start(self):
         # 使用一个死循环, 不断的接受客户端的消息
         try:
-            while True:
-                self._game_start()
+            with writer.as_default():
+                while True:
+                    self._game_start()
         except KeyboardInterrupt:
             print('end')
+            writer.close()
 
-    def save(self, time_format='%m-%d_%H:%M:%S'):
+    def save(self):
         # Create the folder for saving the agent
-        save_file_path = 'save/' + datetime.now().strftime(time_format)
-        if not os.path.isdir(save_file_path):
-            os.makedirs(save_file_path)
+        save_file_path = get_save_path()
         # 保存接下来的数据
         agent.save(save_file_path)
         pool.save(save_file_path)
@@ -280,7 +296,7 @@ class Turing:
                     break
                 # 处理当前帧
                 scene = self._frame_current(origin_data, scene)
-                # 反馈给客户端
+                # 反馈给客户端, 保证每次接受的都是一帧的数据
                 connection.send(str.encode(datetime.now().strftime(self._time_format)[:-3]))
             except ConnectionResetError as exception:
                 print(exception)
@@ -312,13 +328,10 @@ class Turing:
                         pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
                         knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
                         state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
-                        # todo: delete, 验证模型可学习
-                        if agent.actions[action_index] == 'k':
-                            pre_reward = 1
                         pool.record(state, action_index, pre_reward)
                         if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
-                                  "with random:" if is_random else "with action:", agent.actions[action_index],
+                                  "with random:" if is_random else "with action:", game.actions[action_index],
                                   "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
@@ -333,7 +346,8 @@ class Turing:
         boss.reset()
 
     def _get_reward(self, hp: int, enemies: list):
-        """ 先获取到奖励
+        """
+        先获取到奖励
         """
         # knight 生命计算
         reward = -10 * (knight.hp - hp)
@@ -348,7 +362,8 @@ class Turing:
         return reward
 
     def _fight_boss(self, knight_points: [float], positions: list[list[float]]):
-        """ knight的坐标, 长度为4, [left, top, right, bottom]
+        """
+        knight的坐标, 长度为4, [left, top, right, bottom]
         enemies的坐标, 目前有5个, 先固定分配位置, 第二维长度为4, [left, top, right, bottom]
         """
         # 把list转换为ndarray
@@ -360,9 +375,9 @@ class Turing:
         # (1, 32)
         state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
-        action_index, is_random = agent.get_action(state_reshape, pool.count < pool.size / 2)
+        action_index, is_random = agent.get_action(state_reshape, agent.loss > 10, self.fight_count)
         # 把dqn计算得到的action给游戏
-        game.step(agent.actions[action_index])
+        game.step(game.actions[action_index])
 
         return state_fixed, action_index, is_random
 
@@ -377,9 +392,29 @@ class Turing:
             print("Average time delay:", average_time_delay * 1000, "ms")
         # 准备下一场挑战
         game.challenge()
+        # 记录下boss的血量
+        tf.summary.scalar('BOSS HP', boss.hp, self.fight_count)
+        # 统计每个动作的使用次数
+        with tf.name_scope(f"fight_count[{self.fight_count}]"):
+            frequency = [0] * game.len_actions
+            for action in knight.actions:
+                frequency[np.array(action).argmax()] += 1
+            action_frequency = json.dumps(dict(zip(game.actions, frequency)))
+            print(f'Action frequency: {action_frequency}')
+            tf.summary.text('action frequency', action_frequency, len(knight.actions) + 1)
+        writer.flush()
+        self.fight_count += 1
+
+
+def get_save_path(prefix='save/', time_format='%m-%d_%H:%M:%S'):
+    save_file_path = prefix + datetime.now().strftime(time_format)
+    if not os.path.isdir(save_file_path):
+        os.makedirs(save_file_path)
+    return save_file_path
 
 
 if __name__ == '__main__':
+    writer = tf.summary.create_file_writer(get_save_path('log/'))
     game = Game()
     knight = Knight()
     boss = Boss()
