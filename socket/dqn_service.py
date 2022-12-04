@@ -17,6 +17,7 @@ from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from DQN_HollowKnight.Tool.data_helper import parse_data
+from DQN_HollowKnight.Tool.ui_helper import draw_ui
 
 
 class Knight:
@@ -325,14 +326,16 @@ class Turing:
             case 'GG_Hornet_2':
                 match json_data['scene']:
                     case 'GG_Hornet_2':
-                        pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
-                        knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
-                        state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
-                        pool.record(state, action_index, pre_reward)
-                        if pre_reward:
-                            print(receive_time, "Turing get", pre_reward,
-                                  "with random:" if is_random else "with action:", game.actions[action_index],
-                                  "for state:")
+                        collider = json_data['collider']
+                        draw_ui(collider['knight'], collider['enemies'], collider['attacks'])
+                        # pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
+                        # knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
+                        # state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
+                        # pool.record(state, action_index, pre_reward)
+                        # if pre_reward:
+                        #     print(receive_time, "Turing get", pre_reward,
+                        #           "with random:" if is_random else "with action:", game.actions[action_index],
+                        #           "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
         return json_data['scene']
