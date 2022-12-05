@@ -17,18 +17,77 @@ from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from DQN_HollowKnight.Tool.data_helper import parse_data
-from DQN_HollowKnight.Tool.ui_helper import draw_ui
 
 
 class Knight:
     def __init__(self):
         self.hp = 9
+        self.mp = 0
+        # idle, running, airborne, no_input(受伤后一段时间无法接受输入)
+        self.state = 'idle'
+        # x, y 加速度
+        self.velocity = 0, 0
+        # 无敌, 被伤害后一段时间
+        self.invulnerable = False
+        # 正在冲刺中
+        self.dashing = False
+        # 正在黑冲
+        self.superDashing = False
+        # 正在跳跃
+        self.jumping = False
+        # 正在二段跳
+        self.doubleJumping = False
+        # 正在下落
+        self.falling = False
+        # 正在攻击
+        self.attacking = False
+        # 是否可以冲刺
+        self.can_cast = False
+        # 是否可以黑冲
+        self.can_super_dash = False
+        # 记录攻击距离(horizontal, up, down), 记录下默认值, 就不用反复计算了
+        self.attack_distance = 307, 307, 273
         # 记录每个动作的价值
         self.actions = []
 
     def reset(self):
         self.hp = 9
+        self.mp = 0
+        self.state = 'idle'
+        self.velocity = 0, 0
+        self.invulnerable = False
+        self.dashing = False
+        self.superDashing = False
+        self.jumping = False
+        self.doubleJumping = False
+        self.falling = False
+        self.attacking = False
+        self.can_cast = False
+        self.can_super_dash = False
         self.actions = []
+
+    def get_reward(self, knight_data: dict):
+        reward = 10 * (knight_data['hp'] - self.hp)
+        self.hp = knight_data['hp']
+        return reward
+
+    def update_attack(self, attacks_data: list):
+        x_distance, up_distance, down_distance = self.attack_distance
+        if x_distance > 0 and up_distance > 0 and down_distance > 0:
+            return
+        for attack_data in attacks_data:
+            match attack_data['name']:
+                case 'Slash':
+                    x = [position[0] for position in attack_data['position']]
+                    x_distance = max(x) - min(x)
+                case 'UpSlash':
+                    y = [position[1] for position in attack_data['position']]
+                    up_distance = max(y) - min(y)
+                case 'DownSlash':
+                    y = [position[1] for position in attack_data['position']]
+                    down_distance = max(y) - min(y)
+        self.attack_distance = x_distance, up_distance, down_distance
+        print(f'update_attack: {self.attack_distance}')
 
 
 class Boss:
@@ -39,6 +98,14 @@ class Boss:
     def reset(self, name='Hornet Boss 2'):
         self.hp = 800
         self.name = name
+
+    def filter_boss(self, enemy: dict) -> bool:
+        return enemy['name'] == self.name
+
+    def get_reward(self, boss_data: dict):
+        reward = self.hp - boss_data['hp']
+        self.hp = boss_data['hp']
+        return reward
 
 
 class Pool:
@@ -291,7 +358,7 @@ class Turing:
         while True:
             try:
                 # 收到的原始数据
-                origin_data = connection.recv(1024)
+                origin_data = connection.recv(2048)
                 # 如果没有数据, 就断开连接
                 if not origin_data:
                     break
@@ -305,7 +372,7 @@ class Turing:
         # 保存当前记录
         self.save()
 
-    def _frame_current(self, origin_data: bytes, scene: str):
+    def _frame_current(self, origin_data: bytes, pre_scene: str):
         # 记录日志
         receive_time = datetime.now()
         # 保存为字典类型
@@ -318,16 +385,25 @@ class Turing:
         self.delay_time.append(receive_time - send_time)
 
         # 根据不同场景, 进入到不同的任务
-        match scene:
+        scene = json_data['scene']
+        collider = json_data['collider']
+        if collider['Attacks']:
+            knight.update_attack(collider['Attacks'])
+        match pre_scene:
             case 'GG_Workshop':
-                match json_data['scene']:
+                match scene:
                     case 'GG_Hornet_2':
                         self._before_boss(receive_time)
             case 'GG_Hornet_2':
-                match json_data['scene']:
+                match scene:
                     case 'GG_Hornet_2':
-                        collider = json_data['collider']
-                        draw_ui(collider['knight'], collider['enemies'], collider['attacks'])
+                        _knight = collider['Knight']
+                        knight_reward = knight.get_reward(_knight)
+                        _enemies = collider['Enemies']
+                        boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
+                        distance_reward = self._get_distance_reward(_knight, _enemies) if _enemies else 0
+
+                        # draw_ui(collider['knight'], collider['enemies'], collider['attacks'])
                         # pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
                         # knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
                         # state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
@@ -338,7 +414,7 @@ class Turing:
                         #           "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
-        return json_data['scene']
+        return scene
 
     def _before_boss(self, start_time: datetime):
         """ 进入BOSS场景, 需要初始化一些操作
@@ -347,6 +423,17 @@ class Turing:
         self.delay_time = []
         knight.reset()
         boss.reset()
+
+    def _get_distance_reward(self, knight_data: dict, enemies_data: list):
+        boss_data = next(filter(boss.filter_boss, enemies_data))
+        boss_x_list = [position[0] for position in boss_data['position']]
+        boss_y_list = [position[1] for position in boss_data['position']]
+        knight_x_list = [position[0] for position in knight_data['position']]
+        knight_y_list = [position[1] for position in knight_data['position']]
+        # 两两相减, 得出最小的距离
+        x_distance = min([abs(boss_x - knight_x) for knight_x in knight_x_list for boss_x in boss_x_list])
+        y_distance = min([abs(boss_y - knight_y) for knight_y in knight_y_list for boss_y in boss_y_list])
+        #
 
     def _get_reward(self, hp: int, enemies: list):
         """
