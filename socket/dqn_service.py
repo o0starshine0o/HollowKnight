@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 from datetime import datetime
+from itertools import chain
 
 import numpy as np
 import pyautogui
@@ -21,6 +22,13 @@ from DQN_HollowKnight.Tool.data_helper import parse_data
 
 class Knight:
     def __init__(self):
+        # 冗余攻击距离
+        self.redundancy = 20
+        # HP因子
+        self.hp_scale = 10
+        # distance因子
+        self.distance_scale = 1
+        # 基本信息
         self.hp = 9
         self.mp = 0
         # idle, running, airborne, no_input(受伤后一段时间无法接受输入)
@@ -46,7 +54,9 @@ class Knight:
         # 是否可以黑冲
         self.can_super_dash = False
         # 记录攻击距离(horizontal, up, down), 记录下默认值, 就不用反复计算了
-        self.attack_distance = 307, 307, 273
+        self.attack_distance = 307 - self.redundancy, 307 - self.redundancy, 273 - self.redundancy
+        # 能够收获奖励的最远距离, 超过这个距离就要负reward了
+        self.value_distance = 4 * self.attack_distance[0]
         # 记录每个动作的价值
         self.actions = []
 
@@ -67,7 +77,7 @@ class Knight:
         self.actions = []
 
     def get_reward(self, knight_data: dict):
-        reward = 10 * (knight_data['hp'] - self.hp)
+        reward = self.hp_scale * (knight_data['hp'] - self.hp)
         self.hp = knight_data['hp']
         return reward
 
@@ -197,11 +207,11 @@ class Agent:
             knight.actions.append([1 if i == action_index else 0 for i in range(len(game.actions))])
         else:
             prediction = self.__get_prediction__(state)[0].numpy()
-            knight.actions.append(map(str, prediction))
+            knight.actions.append(map(float, prediction))
             action_index = prediction.argmax()
         # 记录每一个动作的价值
         with tf.name_scope(f"fight_count[{fight_count}]"):
-            action_value = dict(zip(game.actions, knight.actions[-1]))
+            action_value = dict(zip(game.action_names, knight.actions[-1]))
             tf.summary.text('action values', json.dumps(action_value), len(knight.actions))
         writer.flush()
 
@@ -282,13 +292,26 @@ class Game:
     """
 
     def __init__(self):
-        self.actions = [None, 'a', 'd', 'j', 'k']
+        self.actions = [
+            ('idle', None),
+            ('left', 'a'),
+            ('right', 'd'),
+            ('attack', 'j'),
+            ('jump', 'k'),
+            ('up_attack', ['w', 'j']),
+            ('down_attack', ['s', 'j'])
+        ]
         self.len_actions = len(self.actions)
+        self.action_names = [action[0] for action in self.actions]
 
-    def step(self, action: str):
-        if action is None:
-            return
-        pyautogui.press(action)
+    def step(self, action: str | list[str] | tuple):
+        match action:
+            case tuple():
+                self.step(action[1])
+            case list():
+                pyautogui.hotkey(*action)
+            case str():
+                pyautogui.press(action)
 
     def challenge(self):
         _thread.start_new_thread(self._challenge, ())
@@ -402,16 +425,18 @@ class Turing:
                         _enemies = collider['Enemies']
                         boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
                         distance_reward = self._get_distance_reward(_knight, _enemies) if _enemies else 0
-
+                        pre_reward = knight_reward + boss_reward + distance_reward
                         # draw_ui(collider['knight'], collider['enemies'], collider['attacks'])
-                        # pre_reward = self._get_reward(json_data['hp'], json_data['enemies'])
-                        # knight_points, enemy_points = json_data['knight_points'], json_data['enemy_points']
-                        # state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
-                        # pool.record(state, action_index, pre_reward)
-                        # if pre_reward:
-                        #     print(receive_time, "Turing get", pre_reward,
-                        #           "with random:" if is_random else "with action:", game.actions[action_index],
-                        #           "for state:")
+
+                        knight_points = _knight['position']
+                        enemy_points = list(chain(*[enemy['position'] for enemy in _enemies]))
+
+                        state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
+                        pool.record(state, action_index, pre_reward)
+                        if pre_reward:
+                            print(receive_time, "Turing get", pre_reward,
+                                  "with random:" if is_random else "with action:", game.actions[action_index],
+                                  "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
         return scene
@@ -433,35 +458,32 @@ class Turing:
         # 两两相减, 得出最小的距离
         x_distance = min([abs(boss_x - knight_x) for knight_x in knight_x_list for boss_x in boss_x_list])
         y_distance = min([abs(boss_y - knight_y) for knight_y in knight_y_list for boss_y in boss_y_list])
-        #
+        # 计算奖励
+        attack_x, attack_up, attack_down = knight.attack_distance
+        # 攻击范围内和攻击范围外使用2套奖励逻辑
+        if x_distance <= attack_x:
+            # 使用线性函数y = kx + b
+            b = -knight.hp_scale
+            k = (knight.distance_scale + knight.hp_scale) / attack_x
+            return k * x_distance + b
+        else:
+            # 使用另外一个线性函数 (x - x1) / (x2 - x1) = (y - y1) / (y2 - y1)
+            # y = (y2 - y1)*(x - x1)/(x2 - x1) + y1
+            return (-knight.distance_scale) * (x_distance - attack_x) / (knight.value_distance - attack_x) \
+                   + knight.distance_scale
 
-    def _get_reward(self, hp: int, enemies: list):
+    def _fight_boss(self, knight_points: list[list[int]], enemies_points: list[list[int]]):
         """
-        先获取到奖励
-        """
-        # knight 生命计算
-        reward = -10 * (knight.hp - hp)
-        knight.hp = hp
-        # boss 生命计算
-        if len(enemies) > 0:
-            enemy = next(enemy for enemy in enemies if enemy['name'] == boss.name)
-            if enemy:
-                reward += (boss.hp - enemy['hp'])
-                boss.hp = enemy['hp']
-        # 综合奖励
-        return reward
-
-    def _fight_boss(self, knight_points: [float], positions: list[list[float]]):
-        """
-        knight的坐标, 长度为4, [left, top, right, bottom]
-        enemies的坐标, 目前有5个, 先固定分配位置, 第二维长度为4, [left, top, right, bottom]
+        knight的坐标, 长度为2, [[left, top], [right, bottom]]
+        enemies的坐标, 目前有5个, 先固定分配位置, 第二维长度为4,
+        [[left, top], [right, bottom]], [[left, top], [right, bottom]]]
         """
         # 把list转换为ndarray
-        positions.insert(0, knight_points)
-        # 调整形状: (n,)
-        state_flatten = np.array(positions).flatten()
-        # (32,)
-        state_fixed = np.pad(state_flatten, (0, 32 - len(state_flatten)))
+        positions = knight_points + enemies_points
+        # 调整形状: (n,), 最多保留32个
+        state_flatten = np.array(positions).flatten()[:32]
+        # (32,), 最多少保留32个
+        state_fixed = np.pad(state_flatten, (0, max(0, 32 - len(state_flatten))))
         # (1, 32)
         state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
@@ -489,7 +511,7 @@ class Turing:
             frequency = [0] * game.len_actions
             for action in knight.actions:
                 frequency[np.array(action).argmax()] += 1
-            action_frequency = json.dumps(dict(zip(game.actions, frequency)))
+            action_frequency = json.dumps(dict(zip(game.action_names, frequency)))
             print(f'Action frequency: {action_frequency}')
             tf.summary.text('action frequency', action_frequency, len(knight.actions) + 1)
         writer.flush()
