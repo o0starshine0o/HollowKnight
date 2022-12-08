@@ -58,7 +58,7 @@ class Knight:
         # 能够收获奖励的最远距离, 超过这个距离就要负reward了
         self.value_distance = 4 * self.attack_distance[0]
         # 记录每个动作的价值
-        self.actions = []
+        self.action_values = []
 
     def reset(self):
         self.hp = 9
@@ -74,7 +74,7 @@ class Knight:
         self.attacking = False
         self.can_cast = False
         self.can_super_dash = False
-        self.actions = []
+        self.action_values = []
 
     def get_reward(self, knight_data: dict):
         reward = self.hp_scale * (knight_data['hp'] - self.hp)
@@ -204,15 +204,15 @@ class Agent:
         # 经验池比较小, 采取随机操作, 增大经验池
         if is_random:
             action_index = random.randint(0, len(game.actions) - 1)
-            knight.actions.append([1 if i == action_index else 0 for i in range(len(game.actions))])
+            knight.action_values.append([1 if i == action_index else 0 for i in range(len(game.actions))])
         else:
             prediction = self.__get_prediction__(state)[0].numpy()
-            knight.actions.append(map(float, prediction))
+            knight.action_values.append(list(map(float, prediction)))
             action_index = prediction.argmax()
         # 记录每一个动作的价值
         with tf.name_scope(f"fight_count[{fight_count}]"):
-            action_value = dict(zip(game.action_names, knight.actions[-1]))
-            tf.summary.text('action values', json.dumps(action_value), len(knight.actions))
+            action_value = dict(zip(game.action_names, knight.action_values[-1]))
+            tf.summary.text('action values', json.dumps(action_value), len(knight.action_values))
         writer.flush()
 
         return action_index, is_random
@@ -509,11 +509,11 @@ class Turing:
         # 统计每个动作的使用次数
         with tf.name_scope(f"fight_count[{self.fight_count}]"):
             frequency = [0] * game.len_actions
-            for action in knight.actions:
-                frequency[np.array(action).argmax()] += 1
+            for action_value in knight.action_values:
+                frequency[np.array(action_value).argmax()] += 1
             action_frequency = json.dumps(dict(zip(game.action_names, frequency)))
             print(f'Action frequency: {action_frequency}')
-            tf.summary.text('action frequency', action_frequency, len(knight.actions) + 1)
+            tf.summary.text('action frequency', action_frequency, len(knight.action_values) + 1)
         writer.flush()
         self.fight_count += 1
 
