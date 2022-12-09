@@ -294,8 +294,8 @@ class Game:
     def __init__(self):
         self.actions = [
             ('idle', None),
-            ('left', 'a'),
-            ('right', 'd'),
+            ('left', self._left),
+            ('right', self._right),
             ('attack', 'j'),
             ('jump', 'k'),
             ('up_attack', ['w', 'j']),
@@ -306,6 +306,8 @@ class Game:
 
     def step(self, action: str | list[str] | tuple):
         match action:
+            case ('left', function) | ('right', function):
+                function()
             case tuple():
                 self.step(action[1])
             case list():
@@ -318,6 +320,9 @@ class Game:
         pass
 
     def _challenge(self):
+        # 取消目前的长按效果
+        pyautogui.keyUp('a')
+        pyautogui.keyUp('d')
         # 允许其他操作来打断无限循环
         time.sleep(5)
         # 给一个动作, 让Knight醒来
@@ -334,6 +339,14 @@ class Game:
         # 选择挑战开始
         pyautogui.press('k')
         time.sleep(1)
+
+    def _left(self):
+        pyautogui.keyUp('d')
+        pyautogui.keyDown('a')
+
+    def _right(self):
+        pyautogui.keyUp('a')
+        pyautogui.keyDown('d')
 
 
 class Turing:
@@ -435,7 +448,7 @@ class Turing:
                         pool.record(state, action_index, pre_reward)
                         if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
-                                  "with random:" if is_random else "with action:", game.actions[action_index],
+                                  "with random:" if is_random else "with action:", game.actions[action_index][0],
                                   "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
