@@ -489,7 +489,8 @@ class Turing:
                         pool.record(state, move_index, action_index, pre_reward)
                         if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
-                                  "with random:" if is_random else "with action:", game.actions[action_index][0],
+                                  "with random:" if is_random else "with prediction:",
+                                  game.move_names[move_index], game.action_names[action_index],
                                   "for state:")
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
@@ -563,14 +564,18 @@ class Turing:
         tf.summary.scalar('BOSS HP', boss.hp, self.fight_count)
         # 统计每个动作的使用次数
         with tf.name_scope(f"fight_count[{self.fight_count}]"):
-            frequency = [0] * (game.len_moves + game.len_actions)
+            move_frequency = [0] * game.len_moves
+            action_frequency = [0] * game.len_actions
             for move_action_value in knight.move_action_values:
                 value = np.array(move_action_value)
-                frequency[value[:game.len_moves].argmax()] += 1
-                frequency[value[game.len_moves:].argmax() + game.len_moves] += 1
-            move_action_frequency = json.dumps(dict(zip(game.move_action_names, frequency)))
-            print(f'Move Action frequency: {move_action_frequency}')
-            tf.summary.text('move action frequency', move_action_frequency, len(knight.move_action_values) + 1)
+                move_frequency[value[:game.len_moves].argmax()] += 1
+                action_frequency[value[game.len_moves:].argmax()] += 1
+            move_frequency = json.dumps(dict(zip(game.move_names, move_frequency)))
+            action_frequency = json.dumps(dict(zip(game.action_names, action_frequency)))
+            print(f'move frequency: {move_frequency}')
+            print(f'action frequency: {action_frequency}')
+            tf.summary.text('move action frequency', json.dumps((move_frequency, action_frequency)),
+                            len(knight.move_action_values) + 1)
         writer.flush()
         self.fight_count += 1
 
