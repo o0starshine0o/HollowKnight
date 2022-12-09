@@ -123,28 +123,39 @@ def _send(message: bytes | str):
         case str():
             message = str.encode(message)
     print(message)
-    client.send(message)
-    client.recv(1024)  # 接收客户端确认
-
-
-if __name__ == '__main__':
-
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(("127.0.0.1", 9203))
-
-    length = sys.argv[1] if len(sys.argv) > 1 else ''
-    length = 3 + int(length) if length.isdigit() else 10
-
-    data = Data(length - 1)
 
     try:
+        client.send(message)
+        client.recv(1024)  # 接收客户端确认
+    except ConnectionResetError as e:
+        print(e)
+
+
+def _send_data():
+    try:
+        length = sys.argv[1] if len(sys.argv) > 1 else ''
+        length = 3 + int(length) if length.isdigit() else 10
+
+        data = Data(length - 1)
+
         for sequence in range(length):
             data.update(sequence)
             _send(json.dumps(data, cls=JsonEncoder))
             time.sleep(0.1)
-    except ConnectionResetError as e:
+    except KeyboardInterrupt as e:
         print(e)
 
-    client.close()
 
+def _connect():
+    try:
+        client.connect(("127.0.0.1", 9203))
+        _send_data()
+        client.close()
+    except ConnectionRefusedError as e:
+        print(e)
+
+
+if __name__ == '__main__':
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _connect()
     exit()

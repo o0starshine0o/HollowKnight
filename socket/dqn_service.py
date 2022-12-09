@@ -58,7 +58,7 @@ class Knight:
         # 能够收获奖励的最远距离, 超过这个距离就要负reward了
         self.value_distance = 4 * self.attack_distance[0]
         # 记录每个动作的价值
-        self.action_values = []
+        self.move_action_values = []
 
     def reset(self):
         self.hp = 9
@@ -74,7 +74,7 @@ class Knight:
         self.attacking = False
         self.can_cast = False
         self.can_super_dash = False
-        self.action_values = []
+        self.move_action_values = []
 
     def get_reward(self, knight_data: dict):
         reward = self.hp_scale * (knight_data['hp'] - self.hp)
@@ -124,44 +124,52 @@ class Pool:
         self.size = size
         if self._file_exist(save_path):
             self.states = np.load(save_path + '/states.npy')
+            self.moves = np.load(save_path + '/moves.npy')
             self.actions = np.load(save_path + '/actions.npy')
             self.rewards = np.load(save_path + '/rewards.npy')
             self.current, self.count, size = tuple(np.load(save_path + '/meta.npy'))
             print(f'load pool:[{self.current}|{self.count}|{size}]', save_path)
         else:
             self.states = np.empty((self.size, 32))
+            self.moves = np.empty(self.size, dtype=int)
             self.actions = np.empty(self.size, dtype=int)
             self.rewards = np.zeros(self.size)
             self.current = 0
             self.count = 0
 
-    def record(self, state: np.ndarray, action: int, reward: float):
+    def record(self, state: np.ndarray, move: int, action: int, reward: float):
         self.states[self.current] = state
         self.actions[self.current] = action
+        self.moves[self.current] = move
         # reward 为上一步的action的奖励, 所以往上推一步
         self.rewards[self.current - 1] = reward
         self.current += 1
         self.count = max(self.count, self.current)
         self.current %= self.size
 
-    def recall(self, size: int) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    def recall(self, size: int) \
+            -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         """
         Returns:
             states: 选取的状态S0
+            moves: 此状态下选取的移动A0
             actions: 此状态下选取的动作A0
             rewards: 选取动作的奖励R0
             next_states: 到达的下一个状态S1
         """
         if self.count < size:
             print('size < count', 'not enough data')
-            return None, None, None, None
+            return None, None, None, None, None
         indices = np.array(random.sample(range(self.count), size))
         next_indices = (indices + 1) % self.count
-        return self.states[indices], self.actions[indices], self.rewards[indices], self.states[next_indices]
+        indices_data = self.states[indices], self.moves[indices], self.actions[indices], self.rewards[indices]
+        next_indices_data = (self.states[next_indices],)
+        return indices_data + next_indices_data
 
     def save(self, save_path: str):
         if save_path and os.path.exists(save_path):
             np.save(save_path + '/states.npy', self.states)
+            np.save(save_path + '/moves.npy', self.moves)
             np.save(save_path + '/actions.npy', self.actions)
             np.save(save_path + '/rewards.npy', self.rewards)
             np.save(save_path + '/meta.npy', np.array([self.current, self.count, self.size]))
@@ -170,6 +178,7 @@ class Pool:
     def _file_exist(self, save_path: str = None) -> bool:
         return save_path \
                and os.path.exists(save_path + '/states.npy') \
+               and os.path.exists(save_path + '/moves.npy') \
                and os.path.exists(save_path + '/actions.npy') \
                and os.path.exists(save_path + '/rewards.npy') \
                and os.path.exists(save_path + '/meta.npy')
@@ -185,15 +194,18 @@ class Agent:
             self.model = self.__build_deep_q_network__(Input(input_size), learning_rate)
         # 程序启动就开始学习, 生命不停, 学习不止
         self.learn_thread = _thread.start_new_thread(self._learn, (gamma, batch_size))
-        self.loss = sys.maxsize
+        self.move_loss = sys.maxsize
+        self.action_loss = sys.maxsize
 
     def __build_deep_q_network__(self, input_layer: Input, learning_rate: float = 0.001):
         hidden = Dense(256, relu)(input_layer)
         hidden = Dense(2048, relu)(hidden)
-        hidden = Dense(128, relu)(hidden)
         flatten = Flatten()(hidden)
-        output_layer = Dense(len(game.actions))(flatten)
-        model = Model(input_layer, output_layer)
+        move = Dense(128, relu)(flatten)
+        action = Dense(128, relu)(flatten)
+        move_output_layer = Dense(len(game.moves))(move)
+        action_output_layer = Dense(len(game.actions))(action)
+        model = Model(input_layer, [move_output_layer, action_output_layer])
         model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
         return model
 
@@ -203,19 +215,23 @@ class Agent:
         """
         # 经验池比较小, 采取随机操作, 增大经验池
         if is_random:
-            action_index = random.randint(0, len(game.actions) - 1)
-            knight.action_values.append([1 if i == action_index else 0 for i in range(len(game.actions))])
+            move_index = random.randint(0, game.len_moves - 1)
+            action_index = random.randint(0, game.len_actions - 1)
+            move_values = [1 if i == move_index else 0 for i in range(game.len_moves)]
+            action_values = [1 if i == action_index else 0 for i in range(game.len_actions)]
+            knight.move_action_values.append(move_values + action_values)
         else:
-            prediction = self.__get_prediction__(state)[0].numpy()
-            knight.action_values.append(list(map(float, prediction)))
-            action_index = prediction.argmax()
+            moves, actions = tuple(prediction.numpy() for prediction in self.__get_prediction__(state))
+            move_index = moves.argmax()
+            action_index = actions.argmax()
+            knight.move_action_values.append(list(map(float, np.concatenate((moves, actions), 1)[0])))
         # 记录每一个动作的价值
         with tf.name_scope(f"fight_count[{fight_count}]"):
-            action_value = dict(zip(game.action_names, knight.action_values[-1]))
-            tf.summary.text('action values', json.dumps(action_value), len(knight.action_values))
+            action_value = dict(zip(game.move_action_names, knight.move_action_values[-1]))
+            tf.summary.text('action values', json.dumps(action_value), len(knight.move_action_values))
         writer.flush()
 
-        return action_index, is_random
+        return move_index, action_index, is_random
 
     def _learn(self, gamma=0.99, batch_size=32, empty_sleep_time=10):
         """
@@ -226,55 +242,67 @@ class Agent:
         try:
             with writer.as_default():
                 while True:
-                    states, actions, rewards, next_states = pool.recall(batch_size)
-                    if states is None or actions is None or rewards is None or next_states is None:
+                    states, moves, actions, rewards, next_states = pool.recall(batch_size)
+                    if states is None or actions is None or moves is None or rewards is None or next_states is None:
                         # 避免无数据时空转
                         time.sleep(empty_sleep_time)
                         continue
 
                     # 核心梯度下降过程
-                    self.loss = self._learn_kernel(states, actions, rewards, next_states, gamma).numpy()
+                    move_loss, action_loss = self._learn_kernel(states, moves, actions, rewards, next_states, gamma)
+                    self.move_loss, self.action_loss = move_loss.numpy(), action_loss.numpy()
 
                     step += 1
 
                     # 保存损失信息
                     if step % 1000 == 0:
-                        tf.summary.scalar('loss', self.loss, step)
+                        tf.summary.scalar('move_loss', self.move_loss, step)
+                        tf.summary.scalar('action_loss', self.action_loss, step)
                         writer.flush()
 
                     # 输出一些信息表明线程正常运行
                     if step % 10000 == 0:
                         # 不解释
-                        print(f'good good study: {datetime.now() - start}, day day up {self.loss}')
+                        print(f'good good study: {datetime.now() - start}, '
+                              f'day day up {self.move_loss}, {self.action_loss}')
                         start = datetime.now()
         except KeyboardInterrupt:
             writer.close()
 
-    def _learn_kernel(self, states: np.ndarray, actions: np.ndarray, rewards: np.ndarray, next_states: np.ndarray,
-                      gamma=0.99) -> tf.Tensor:
+    def _learn_kernel(self, states: np.ndarray, moves: np.ndarray, actions: np.ndarray, rewards: np.ndarray,
+                      next_states: np.ndarray, gamma=0.99) -> (tf.Tensor, tf.Tensor):
         # 1, 根据当前网络, 计算next_states下所有action的value, 并且选取价值最大的那个动作的值, 作为next_q_max
-        # next_actions_value_max = max(Q(S_1, W)), shape: (32, )
-        next_actions_value_max = self.__get_prediction__(next_states).numpy().max(axis=1)
+        # next_moves_value_max = max(Q(S_1, W)), shape: (32, )
+        # next_actions_value_max = max(Q(S_1, W)), shape: (32,)
+        next_moves_value_max, next_actions_value_max = \
+            tuple(prediction.numpy().max(axis=1) for prediction in self.__get_prediction__(next_states))
         # 2, 添加gamma, reward作为target_q
-        # target_q = R_0 + gamma * next_q_max, shape: (32, )
-        target_q = rewards + gamma * next_actions_value_max
+        # target_move_q = R_0 + gamma * next_q_max, shape: (32, )
+        target_move_q = rewards + gamma * next_moves_value_max
+        # target_action_q = R_0 + gamma * next_q_max, shape: (32, )
+        target_action_q = rewards + gamma * next_actions_value_max
         with tf.GradientTape() as tape:
-            # 3, 根据当前网络, 重新计算states下所有actions的value
+            # 3, 根据当前网络, 重新计算states下所有moves和actions的value
+            # move_values = Q(S0, W), shape: (32, 3)
             # action_values = Q(S0, W), shape: (32, 5)
-            action_values = self.__get_prediction__(states)
-            # 当时选中的action, 转换为one_hot, shape: (32, 5)
-            one_hot_actions = tf.keras.utils.to_categorical(actions, len(game.actions))
-            # 根据当时选择的action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
-            q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
+            move_values, action_values = tuple(self.__get_prediction__(states))
+            # 当时选中的move和action, 转换为one_hot, shape: (32, 3)和(32, 5)
+            one_hot_moves = tf.keras.utils.to_categorical(moves, game.len_moves)
+            one_hot_actions = tf.keras.utils.to_categorical(actions, game.len_actions)
+            # 根据当时选择的move和action(可能是随机选择的, 不一定是argmax), 和现在的网络参数, 计算q值, shape: (32, )
+            move_q = tf.reduce_sum(tf.multiply(move_values, one_hot_moves), axis=1)
+            action_q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
             # 4, 使用2者的MSE作为loss(差值小于1), 否则使用绝对值(差值大于1)
             # loss = (target_q - q)^2
-            loss = self.model.loss(target_q, q)
+            move_loss = self.model.loss(target_move_q, move_q)
+            action_loss = self.model.loss(target_action_q, action_q)
             # 5, 计算梯度, 结果是一个list, 记录了每一层, 每一个cell需要下降的梯度
-            gradients = tape.gradient(loss, self.model.trainable_variables)
+            # 多个loss合并, 一同梯度下降
+            gradients = tape.gradient(move_loss + action_loss, self.model.trainable_variables)
         # 6, 反向传播, 更新model的参数
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
-        return loss
+        return move_loss, action_loss
 
     def save(self, save_path: str = None):
         if save_path and os.path.exists(save_path):
@@ -283,6 +311,9 @@ class Agent:
 
     @tf.function
     def __get_prediction__(self, state: np.ndarray):
+        """
+        Return: list: [shape(1, 3), shape(1, 5)]
+        """
         return self.model(state)
 
 
@@ -292,28 +323,38 @@ class Game:
     """
 
     def __init__(self):
-        self.actions = [
+        self.moves = [
             ('idle', None),
             ('left', self._left),
             ('right', self._right),
+        ]
+        self.actions = [
+            ('idle', None),
             ('attack', 'j'),
             ('jump', 'k'),
             ('up_attack', ['w', 'j']),
             ('down_attack', ['s', 'j'])
         ]
         self.len_actions = len(self.actions)
+        self.len_moves = len(self.moves)
+        self.move_names = [move[0] for move in self.moves]
         self.action_names = [action[0] for action in self.actions]
+        self.move_action_names = self.move_names + self.action_names
 
-    def step(self, action: str | list[str] | tuple):
-        match action:
+    def step(self, move: str | list[str] | tuple, action: str | list[str] | tuple):
+        self._step(move)
+        self._step(action)
+
+    def _step(self, step: str | list[str] | tuple):
+        match step:
             case ('left', function) | ('right', function):
                 function()
             case tuple():
-                self.step(action[1])
+                self._step(step[1])
             case list():
-                pyautogui.hotkey(*action)
+                pyautogui.hotkey(*step)
             case str():
-                pyautogui.press(action)
+                pyautogui.press(step)
 
     def challenge(self):
         _thread.start_new_thread(self._challenge, ())
@@ -380,7 +421,7 @@ class Turing:
 
     def save(self):
         # Create the folder for saving the agent
-        save_file_path = get_save_path()
+        save_file_path = get_save_path('save/')
         # 保存接下来的数据
         agent.save(save_file_path)
         pool.save(save_file_path)
@@ -444,8 +485,8 @@ class Turing:
                         knight_points = _knight['position']
                         enemy_points = list(chain(*[enemy['position'] for enemy in _enemies]))
 
-                        state, action_index, is_random = self._fight_boss(knight_points, enemy_points)
-                        pool.record(state, action_index, pre_reward)
+                        state, move_index, action_index, is_random = self._fight_boss(knight_points, enemy_points)
+                        pool.record(state, move_index, action_index, pre_reward)
                         if pre_reward:
                             print(receive_time, "Turing get", pre_reward,
                                   "with random:" if is_random else "with action:", game.actions[action_index][0],
@@ -500,11 +541,12 @@ class Turing:
         # (1, 32)
         state_reshape = np.reshape(state_fixed, (1, 32))
         # 把得到的状态给DQN, 拿到action
-        action_index, is_random = agent.get_action(state_reshape, agent.loss > 10, self.fight_count)
+        is_random = agent.move_loss > 20 or agent.action_loss > 20
+        move_index, action_index, is_random = agent.get_action(state_reshape, is_random, self.fight_count)
         # 把dqn计算得到的action给游戏
-        game.step(game.actions[action_index])
+        game.step(game.moves[move_index], game.actions[action_index])
 
-        return state_fixed, action_index, is_random
+        return state_fixed, move_index, action_index, is_random
 
     def _end_boss(self, end_time: datetime):
         """ 离开BOSS场景, 需要统计一些操作
@@ -521,24 +563,27 @@ class Turing:
         tf.summary.scalar('BOSS HP', boss.hp, self.fight_count)
         # 统计每个动作的使用次数
         with tf.name_scope(f"fight_count[{self.fight_count}]"):
-            frequency = [0] * game.len_actions
-            for action_value in knight.action_values:
-                frequency[np.array(action_value).argmax()] += 1
-            action_frequency = json.dumps(dict(zip(game.action_names, frequency)))
-            print(f'Action frequency: {action_frequency}')
-            tf.summary.text('action frequency', action_frequency, len(knight.action_values) + 1)
+            frequency = [0] * (game.len_moves + game.len_actions)
+            for move_action_value in knight.move_action_values:
+                value = np.array(move_action_value)
+                frequency[value[:game.len_moves].argmax()] += 1
+                frequency[value[game.len_moves:].argmax() + game.len_moves] += 1
+            move_action_frequency = json.dumps(dict(zip(game.move_action_names, frequency)))
+            print(f'Move Action frequency: {move_action_frequency}')
+            tf.summary.text('move action frequency', move_action_frequency, len(knight.move_action_values) + 1)
         writer.flush()
         self.fight_count += 1
 
 
-def get_save_path(prefix='save/', time_format='%m-%d_%H:%M:%S'):
-    save_file_path = prefix + datetime.now().strftime(time_format)
+def get_save_path(prefix, time_format='%m-%d_%H:%M:%S'):
+    save_file_path = prefix + start_time.strftime(time_format)
     if not os.path.isdir(save_file_path):
         os.makedirs(save_file_path)
     return save_file_path
 
 
 if __name__ == '__main__':
+    start_time = datetime.now()
     writer = tf.summary.create_file_writer(get_save_path('log/'))
     game = Game()
     knight = Knight()

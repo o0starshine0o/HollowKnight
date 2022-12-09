@@ -18,16 +18,16 @@
       2. 带bak的是游戏里的自动存档，每次坐椅子或者触发其他存档事件（比如某些boss战，或者送花，等等）就会自动保存一个带编号的bak文件，游戏退出的时候会把最新的bak文件结合当前状态存入user*.dat（这是你每次进游戏读取的东西）。
       3. 进入寻神者,直接挑战BOSS
    3. 如何修改存档,让所有玩法都解锁
-      1. 找到解锁了所有玩法的存档, 项目里就有, 找了半天..
-      2. mod修改:https://www.wolai.com/2oCyqkQtMrrLNgqYsZaTdE
-      3. mods的保存位置: /Users/huyongsheng/Library/Application\ Support/Steam/steamapps/common/Hollow\ Knight/hollow_knight.app/Contents/Resources/Data/Managed/Mods
-      4. mod安装失败的log: /Users/huyongsheng/Library/Application Support/unity.Team Cherry.Hollow Knight/ModLog.txt
-      5. 尝试一个mod: 伤害值显示, DamagedValue, 2个地方都需要文件才能正常运行
-      6. 显示HP, MP等信息
-         1. 显示更多信息, 比如角色状态, 精灵边界
-         2. 如何把相应的信息读取到input中
-         3. 如何做出自己的mod, 直接能够把相关信息输出
-         4. 查看debug的mod
+      1. 找到解锁了所有玩法的存档, 项目里就有, 找了半天.., √
+      2. mod修改:https://www.wolai.com/2oCyqkQtMrrLNgqYsZaTdE, √
+      3. mods的保存位置: /Users/huyongsheng/Library/Application\ Support/Steam/steamapps/common/Hollow\ Knight/hollow_knight.app/Contents/Resources/Data/Managed/Mods, √
+      4. mod安装失败的log: /Users/huyongsheng/Library/Application Support/unity.Team Cherry.Hollow Knight/ModLog.txt, √
+      5. 尝试一个mod: 伤害值显示, DamagedValue, 2个地方都需要文件才能正常运行, √
+      6. 显示HP, MP等信息, √
+         1. 显示更多信息, 比如角色状态, 精灵边界, √
+         2. 如何把相应的信息读取到input中, √
+         3. 如何做出自己的mod, 直接能够把相关信息输出, √
+         4. 查看debug的mod, √
       7. 创建mod: https://space.bilibili.com/290906064/article
          1. 安装开发环境: 
          2. 按照教程, 制作一个空的mod
@@ -356,7 +356,11 @@
                3. 而且还是分成2个网络, 分别给不同的奖励值
                4. 每0.1秒才给出一个动作和一个奖励
          8. 根据重新设计的规则, Turing选择attack和down_attack的频率很高, 但是负值比较多, 而且也无法体现出动作很大的差异
-            1. 增大正向奖励, 减少负向奖励
+            1. BOSS血量下探到了600, 可喜可贺啊
+            2. 增大正向奖励, 减少负向奖励
+            3. 把左右移动单独拿出来, 做成独立控制
+               1. 借鉴Dueling-DQN的方法, 把网络拆分成2个输出, √
+            4. 增大掉血的负向奖励, 要不Turing只为了攻击BOSS, 完全不管自己状况
       5. 保存每一个动作的价值,便于后期查找原因, √
          1. tensorboard是否支持, √
             1. text支持, 需要自己去计算每一句的分布, √
