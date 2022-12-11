@@ -12,7 +12,7 @@ from itertools import chain
 import numpy as np
 import pyautogui
 import tensorflow as tf
-from tensorflow.python.keras.activations import relu
+from tensorflow.python.keras.activations import relu, softmax
 from tensorflow.python.keras.layers import Dense, Flatten, Input
 from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
@@ -197,8 +197,8 @@ class Agent:
         flatten = Flatten()(hidden)
         move = Dense(128, relu)(flatten)
         action = Dense(128, relu)(flatten)
-        move_output_layer = Dense(len(game.moves))(move)
-        action_output_layer = Dense(len(game.actions))(action)
+        move_output_layer = Dense(len(game.moves), softmax)(move)
+        action_output_layer = Dense(len(game.actions), softmax)(action)
         model = Model(input_layer, [move_output_layer, action_output_layer])
         model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
         return model
@@ -288,6 +288,8 @@ class Agent:
             # 5, 计算梯度, 结果是一个list, 记录了每一层, 每一个cell需要下降的梯度
             # 多个loss合并, 一同梯度下降
             gradients = tape.gradient(move_loss + action_loss, self.model.trainable_variables)
+            # 梯度不大, 没必要裁剪
+            # gradients = [tf.clip_by_norm(gradient, 15) for gradient in gradients]
         # 6, 反向传播, 更新model的参数
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
@@ -312,6 +314,7 @@ class Game:
     """
 
     def __init__(self):
+        self.width, self.height = 2560, 1378
         self.moves = [
             ('idle', None),
             ('left', self._left),
@@ -528,7 +531,7 @@ class Turing:
         [[left, top], [right, bottom]], [[left, top], [right, bottom]]]
         """
         # 把list转换为ndarray
-        positions = knight_points + enemies_points
+        positions = [[point[0] / game.width, point[1] / game.height] for point in knight_points + enemies_points]
         # 调整形状: (n,), 最多保留32个
         state_flatten = np.array(positions).flatten()[:32]
         # (32,), 最多少保留32个

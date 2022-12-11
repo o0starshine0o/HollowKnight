@@ -1,10 +1,11 @@
 import json
+import random
 import socket
 import sys
-import random
 from datetime import datetime
 
 from DQN_HollowKnight.Tool.data_helper import parse_data
+from DQN_HollowKnight.Tool.ui_helper import start_draw, end_draw, draw_ui
 
 
 class JsonEncoder(json.JSONEncoder):
@@ -159,13 +160,21 @@ def _step(message: str):
 
 def _send_data():
     move_index, action_index = 0, 0
+
+    start_draw()
     try:
         for index in range(data.count):
             data.update(index, move_index, action_index)
-            move_index, action_index = _step(json.dumps(data, cls=JsonEncoder))
+            json_data = json.dumps(data, cls=JsonEncoder)
+            dict_data = parse_data(json_data)
+            collider = dict_data['collider']
+            draw_ui(collider['Knight'], collider['Enemies'], collider['Attacks'])
+            move_index, action_index = _step(json_data)
             # time.sleep(0.001)
     except KeyboardInterrupt as e:
         print(e)
+    finally:
+        end_draw()
 
 
 def _connect():
