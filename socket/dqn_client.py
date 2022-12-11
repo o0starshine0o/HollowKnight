@@ -1,8 +1,10 @@
 import json
 import socket
 import sys
-import time
+import random
 from datetime import datetime
+
+from DQN_HollowKnight.Tool.data_helper import parse_data
 
 
 class JsonEncoder(json.JSONEncoder):
@@ -10,13 +12,18 @@ class JsonEncoder(json.JSONEncoder):
         return o.__dict__
 
 
+class Env:
+    x = 293, 2260
+    y = 173, 1080
+
+
 class Knight:
     def __init__(self):
-        self.position = [[403, 619], [370, 533]]
+        self.position = [[393, 283], [436, 173]]
         self.hp = 9
         self.mp = 0
         self.state = 'airborne'
-        self.velocity = [0, -0.948]
+        self.velocity = [0, 0]
         self.invulnerable = False
         self.dashing = False
         self.superDashing = False
@@ -27,8 +34,24 @@ class Knight:
         self.canCast = True
         self.canSuperDash = False
 
-    def update(self, index: int):
-        pass
+    def update(self, index: int, move_index: int, action_index: int):
+        match move_index:
+            case 0:
+                self.velocity = [0, 0]
+            case 1:
+                self.velocity = [-random.randint(40, 60), 0]
+            case 2:
+                self.velocity = [random.randint(40, 60), 0]
+
+        # left
+        self.position[0][0] += self.velocity[0]
+        self.position[0][0] = max(min(self.position[0][0], Env.x[1]), Env.x[0])
+        # top
+        self.position[0][1] += self.velocity[1]
+        # right
+        self.position[1][0] = self.position[0][0] + 43
+        # bottom
+        self.position[1][1] = self.position[0][1] - 110
 
 
 class Enemy:
@@ -36,7 +59,7 @@ class Enemy:
     maxHp = 800
     name = "Hornet Boss 2"
     isActive = True
-    position = [[395, 350], [514, 350]]
+    position = [[695, 283], [814, 173]]
 
     def __init__(self, index=0):
         super().__init__()
@@ -51,7 +74,7 @@ class Enemy:
         self.maxHp = 800
         self.name = "Hornet Boss 2"
         self.isActive = True
-        self.position = [[395, 350], [514, 350]]
+        self.position = [[1695, 283], [1814, 173]]
 
     def _init_attack(self):
         self.hp = 800
@@ -79,11 +102,11 @@ class Collider:
 
     def __init__(self):
         self.Knight = Knight()
-        self.Enemies = [Enemy(i) for i in range(2)]
-        self.Attacks = [Attack(i) for i in range(1)]
+        self.Enemies = [Enemy(i) for i in range(1)]
+        self.Attacks = [Attack(i) for i in range(0)]
 
-    def update(self, index: int):
-        self.Knight.update(index)
+    def update(self, index: int, move_index: int, action_index: int):
+        self.Knight.update(index, move_index, action_index)
         for enemy in self.Enemies:
             enemy.update(index)
         for attack in self.Attacks:
@@ -106,7 +129,7 @@ class Data:
     def _to_hornet(self):
         self.scene = 'GG_Hornet_2'
 
-    def update(self, index: int):
+    def update(self, index: int, move_index: int, action_index: int):
         match index:
             case 0:
                 self._to_workshop()
@@ -114,34 +137,33 @@ class Data:
                 self._to_hornet()
             case self.count:
                 self._to_workshop()
-        self.collider.update(index)
+        self.collider.update(index, move_index, action_index)
         self.time = datetime.now().strftime('%m/%d/%Y %I:%M:%S %p.%f')[:-3]
 
 
-def _send(message: bytes | str):
-    match message:
-        case str():
-            message = str.encode(message)
-    print(message)
-
+def _try_step(message: bytes) -> bytes:
     try:
         client.send(message)
-        client.recv(1024)  # 接收客户端确认
+        return client.recv(2048)
     except ConnectionResetError as e:
+        print(e)
+    except BrokenPipeError as e:
         print(e)
 
 
+def _step(message: str):
+    print(f'step: {message}')
+    origin_data = _try_step(str.encode(message))
+    return tuple(parse_data(origin_data)) if origin_data else (0, 0)
+
+
 def _send_data():
+    move_index, action_index = 0, 0
     try:
-        length = sys.argv[1] if len(sys.argv) > 1 else ''
-        length = 3 + int(length) if length.isdigit() else 10
-
-        data = Data(length - 1)
-
-        for sequence in range(length):
-            data.update(sequence)
-            _send(json.dumps(data, cls=JsonEncoder))
-            time.sleep(0.1)
+        for index in range(data.count):
+            data.update(index, move_index, action_index)
+            move_index, action_index = _step(json.dumps(data, cls=JsonEncoder))
+            # time.sleep(0.001)
     except KeyboardInterrupt as e:
         print(e)
 
@@ -155,7 +177,14 @@ def _connect():
         print(e)
 
 
+def _get_sequence_length() -> int:
+    length = sys.argv[1] if len(sys.argv) > 1 else ''
+    length = 3 + int(length) if length.isdigit() else 10
+    return length
+
+
 if __name__ == '__main__':
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data = Data(_get_sequence_length() - 1)
     _connect()
     exit()

@@ -1,8 +1,5 @@
 import matplotlib.pyplot as plt
 
-plt.xlim((0, 1920))
-plt.ylim((0, 1080))
-
 
 def draw(p: list, color: str, alpha=1.0):
     if len(p) == 1:
@@ -17,15 +14,27 @@ def draw(p: list, color: str, alpha=1.0):
 
 
 def draw_ui(knight: dict, enemies: list, attacks: list = None):
-    draw(knight['position'], '#0000FF')
+    plt.cla()
+    plt.xlim((0, 2400))
+    plt.ylim((0, 1080))
+
+    draw(knight['position'], '#0000FF', 0.5)
 
     for enemy in enemies:
-        draw(enemy['position'], '#FF0000')
+        draw(enemy['position'], '#FF0000', 0.5)
 
     for attack in attacks:
         draw(attack['position'], '#00FFFF', 0.1)
 
-    plt.show()
+    plt.pause(0.05)
+
+
+def start_draw():
+    plt.ion()
+
+
+def end_draw():
+    plt.ioff()
 
 
 if __name__ == '__main__':
