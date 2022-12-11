@@ -30,10 +30,12 @@ class Knight:
         self.superDashing = False
         self.jumping = False
         self.doubleJumping = False
-        self.falling = True
+        self.falling = False
         self.attacking = False
         self.canCast = True
-        self.canSuperDash = False
+        self.canSuperDash = True
+        self.touchingWall = False
+        self.facingRight = True
 
     def update(self, index: int, move_index: int, action_index: int):
         match move_index:
@@ -41,8 +43,10 @@ class Knight:
                 self.velocity = [0, 0]
             case 1:
                 self.velocity = [-random.randint(40, 60), 0]
+                self.facingRight = False
             case 2:
                 self.velocity = [random.randint(40, 60), 0]
+                self.facingRight = True
 
         # left
         self.position[0][0] += self.velocity[0]
@@ -53,6 +57,8 @@ class Knight:
         self.position[1][0] = self.position[0][0] + 43
         # bottom
         self.position[1][1] = self.position[0][1] - 110
+
+        self.touchingWall = self.position[0][0] == Env.x[1] or self.position[0][0] == Env.x[0]
 
 
 class Enemy:

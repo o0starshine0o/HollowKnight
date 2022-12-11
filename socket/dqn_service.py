@@ -18,7 +18,7 @@ from tensorflow.python.keras.models import Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from DQN_HollowKnight.Tool.data_helper import parse_data
-from DQN_HollowKnight.Tool.ui_helper import start_draw, end_draw, draw_ui
+from DQN_HollowKnight.Tool.ui_helper import start_draw, end_draw
 
 
 class Knight:
@@ -51,15 +51,20 @@ class Knight:
         # 正在攻击
         self.attacking = False
         # 是否可以冲刺
-        self.can_cast = False
+        self.canCast = False
         # 是否可以黑冲
-        self.can_super_dash = False
+        self.canSuperDash = False
+        # 是否接触到墙壁
+        self.touchingWall = False
+        # 是否面朝右方
+        self.facingRight = True
         # 记录攻击距离(horizontal, up, down), 记录下默认值, 就不用反复计算了
         self.attack_distance = 307 - self.redundancy, 307 - self.redundancy, 273 - self.redundancy
         # 能够收获奖励的最远距离, 超过这个距离就要负reward了
         self.value_distance = 4 * self.attack_distance[0]
         # 记录每个动作的价值
-        self.move_action_values = []
+        self.move_values = []
+        self.action_values = []
 
     def reset(self):
         self.hp = 9
@@ -73,14 +78,32 @@ class Knight:
         self.doubleJumping = False
         self.falling = False
         self.attacking = False
-        self.can_cast = False
-        self.can_super_dash = False
-        self.move_action_values = []
+        self.touchingWall = False
+        self.facingRight = True
+        self.canCast = False
+        self.canSuperDash = False
+        self.move_values = []
+        self.action_values = []
+
+    def update(self, _knight: dict):
+        self.hp = _knight['hp']
+        self.mp = _knight['mp']
+        self.state = _knight['state']
+        self.velocity = _knight['velocity']
+        self.invulnerable = _knight['invulnerable']
+        self.dashing = _knight['dashing']
+        self.superDashing = _knight['superDashing']
+        self.jumping = _knight['jumping']
+        self.doubleJumping = _knight['doubleJumping']
+        self.falling = _knight['falling']
+        self.attacking = _knight['attacking']
+        self.canCast = _knight['canCast']
+        self.canSuperDash = _knight['canSuperDash']
+        self.touchingWall = _knight['touchingWall']
+        self.facingRight = _knight['facingRight']
 
     def get_reward(self, knight_data: dict):
-        reward = self.hp_scale * (knight_data['hp'] - self.hp)
-        self.hp = knight_data['hp']
-        return reward
+        return self.hp_scale * (knight_data['hp'] - self.hp)
 
     def update_attack(self, attacks_data: list):
         x_distance, up_distance, down_distance = self.attack_distance
@@ -208,19 +231,28 @@ class Agent:
         返回一个action的索引
         """
         # 经验池比较小, 采取随机操作, 增大经验池
-        move_random = agent.move_loss > 20
-        action_random = agent.action_loss > 20
-        moves, actions = tuple(prediction.numpy() for prediction in self.__get_prediction__(state))
-        move_index = random.randint(0, game.len_moves - 1) if move_random else moves.argmax()
-        action_index = random.randint(0, game.len_actions - 1) if action_random else actions.argmax()
-        knight.move_action_values.append(list(map(float, np.concatenate((moves, actions), 1)[0])))
+        # 即便经验池够了, 还是需要一定的探索性
+        move_random = pool.current < 1000 or random.random() < 0.05
+        action_random = pool.current < 1000 or random.random() < 0.05
+        move_values, action_values = tuple(prediction.numpy() for prediction in self.__get_prediction__(state))
+        move_index = self._get_random_move_index() if move_random else move_values.argmax()
+        action_index = random.randint(0, game.len_actions - 1) if action_random else action_values.argmax()
+        knight.move_values.append(tuple(map(float, move_values[0])))
+        knight.action_values.append(tuple(map(float, move_values[0])))
         # 记录每一个动作的价值
         with tf.name_scope(f"fight_count[{fight_count}]"):
-            action_value = dict(zip(game.move_action_names, knight.move_action_values[-1]))
-            tf.summary.text('action values', json.dumps(action_value), len(knight.move_action_values))
+            move_value = dict(zip(game.move_names, knight.move_values[-1]))
+            action_value = dict(zip(game.action_names, knight.action_values[-1]))
+            tf.summary.text('move action values', json.dumps((move_value, action_value)), len(knight.move_values))
         writer.flush()
 
         return move_index, action_index, move_random, action_random
+
+    def _get_random_move_index(self) -> int:
+        if knight.touchingWall:
+            return 1 if knight.facingRight else 2
+        else:
+            return 2 if knight.facingRight else 1
 
     def _learn(self, gamma=0.99, batch_size=32, empty_sleep_time=10):
         """
@@ -468,6 +500,8 @@ class Turing:
                     case 'GG_Hornet_2':
                         _knight = collider['Knight']
                         knight_reward = knight.get_reward(_knight)
+                        knight.update(_knight)
+
                         _enemies = collider['Enemies']
                         boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
                         move_reward = self._get_move_reward(_knight, _enemies) if _enemies else 0
@@ -560,16 +594,16 @@ class Turing:
         with tf.name_scope(f"fight_count[{self.fight_count}]"):
             move_frequency = [0] * game.len_moves
             action_frequency = [0] * game.len_actions
-            for move_action_value in knight.move_action_values:
-                value = np.array(move_action_value)
-                move_frequency[value[:game.len_moves].argmax()] += 1
-                action_frequency[value[game.len_moves:].argmax()] += 1
+            for index in [np.array(move_value).argmax() for move_value in knight.move_values]:
+                move_frequency[index] += 1
+            for index in [np.array(action_value).argmax() for action_value in knight.action_values]:
+                action_frequency[index] += 1
             move_frequency = json.dumps(dict(zip(game.move_names, move_frequency)))
             action_frequency = json.dumps(dict(zip(game.action_names, action_frequency)))
             print(f'move frequency: {move_frequency}')
             print(f'action frequency: {action_frequency}')
             tf.summary.text('move action frequency', json.dumps((move_frequency, action_frequency)),
-                            len(knight.move_action_values) + 1)
+                            len(knight.action_values) + 1)
         writer.flush()
         self.fight_count += 1
 
