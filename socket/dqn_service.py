@@ -346,7 +346,14 @@ class Game:
     """
 
     def __init__(self):
+        # 屏幕宽高, 用于把绝对坐标转换成float
         self.width, self.height = 2560, 1378
+        # 墙坐标, 用于计算move_reward, 避免一直撞墙
+        self.wall = [293, 2260]
+        # 用于计算knight与wall的距离后给与的奖励
+        self.wall_reward = -2
+        # 距离墙多近开始判断, 认为估计用攻击距离的一半吧
+        self.wall_distance = 140
         self.moves = [
             ('idle', None),
             ('left', self._left),
@@ -364,6 +371,20 @@ class Game:
         self.move_names = [move[0] for move in self.moves]
         self.action_names = [action[0] for action in self.actions]
         self.move_action_names = self.move_names + self.action_names
+
+    def update(self, _knight: dict):
+        if _knight['touchingWall']:
+            point_x = [point[0] for point in _knight['position']]
+            if _knight['facingRight']:
+                self.wall[1] = point_x[1]
+            else:
+                self.wall[0] = point_x[0]
+
+    def get_wall_reward(self, _knight: dict) -> int:
+        knight_x_list = [position[0] for position in _knight['position']]
+        distance = min([abs(wall_x - knight_x) for knight_x in knight_x_list for wall_x in game.wall])
+        reward = (self.wall_distance * self.wall_reward - self.wall_reward * distance) / self.wall_distance
+        return max(min(reward, 0), self.wall_reward)
 
     def step(self, move: str | list[str] | tuple, action: str | list[str] | tuple):
         self._step(move)
@@ -504,8 +525,15 @@ class Turing:
 
                         _enemies = collider['Enemies']
                         boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
-                        move_reward = self._get_move_reward(_knight, _enemies) if _enemies else 0
-                        hp_reward = knight_reward + boss_reward
+
+                        action_reward = knight_reward + boss_reward
+
+                        enemy_reward = self._get_move_reward(_knight, _enemies) if _enemies else 0
+                        wall_reward = game.get_wall_reward(_knight)
+
+                        move_reward = enemy_reward + wall_reward
+
+                        game.update(_knight)
                         # draw_ui(collider['Knight'], collider['Enemies'], collider['Attacks'])
 
                         knight_points = _knight['position']
@@ -515,12 +543,12 @@ class Turing:
                             self._fight_boss(knight_points, enemy_points)
                         pool.record(state, move_index, action_index, move_reward, 0)
 
-                        if move_reward or hp_reward:
+                        if move_reward or action_reward:
                             print(receive_time, 'Turing',
                                   '[random]:' if move_random else '[prediction]:',
                                   'move', game.move_names[move_index], 'get', move_reward,
                                   '[random]:' if action_random else '[prediction]:',
-                                  'action', game.action_names[action_index], 'get', hp_reward,
+                                  'action', game.action_names[action_index], 'get', action_reward,
                                   )
                     case 'GG_Workshop':
                         self._end_boss(receive_time)

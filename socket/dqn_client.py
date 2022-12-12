@@ -39,8 +39,6 @@ class Knight:
 
     def update(self, index: int, move_index: int, action_index: int):
         match move_index:
-            case 0:
-                self.velocity = [0, 0]
             case 1:
                 self.velocity = [-random.randint(40, 60), 0]
                 self.facingRight = False
@@ -66,7 +64,7 @@ class Enemy:
     maxHp = 800
     name = "Hornet Boss 2"
     isActive = True
-    position = [[695, 283], [814, 173]]
+    position = [[1695, 283], [1814, 173]]
 
     def __init__(self, index=0):
         super().__init__()
@@ -176,7 +174,6 @@ def _send_data():
             collider = dict_data['collider']
             draw_ui(collider['Knight'], collider['Enemies'], collider['Attacks'])
             move_index, action_index = _step(json_data)
-            # time.sleep(0.001)
     except KeyboardInterrupt as e:
         print(e)
     finally:
