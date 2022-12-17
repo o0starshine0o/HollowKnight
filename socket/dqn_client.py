@@ -65,9 +65,9 @@ class Enemy:
     name = "Hornet Boss 2"
     isActive = True
     position = [[1695, 283], [1814, 173]]
+    move = 50
 
     def __init__(self, index=0):
-        super().__init__()
         match index:
             case 0:
                 self._init_hornet()
@@ -89,7 +89,10 @@ class Enemy:
         self.position = [[437, 324], [443, 310], [345, 244]]
 
     def update(self, index: int):
-        pass
+        if self.position[0][0] <= Env.x[0] or self.position[0][0] >= Env.x[1]:
+            self.move = -1 * self.move
+        self.position[0][0] += self.move
+        self.position[1][0] = self.position[0][0] + 119
 
 
 class Attack:
@@ -122,7 +125,10 @@ class Collider:
 class Data:
 
     def __init__(self, count):
-        super().__init__()
+        """
+        Params
+        count 需要执行的次数
+        """
         self.scene = ""
         self.time = ''
         self.count = count
@@ -135,6 +141,12 @@ class Data:
         self.scene = 'GG_Hornet_2'
 
     def update(self, index: int, move_index: int, action_index: int):
+        """
+        Params
+        index 当前执行动作序列
+        move_index 负责移动的index
+        action_index 负责动作的index
+        """
         match index:
             case 0:
                 self._to_workshop()
