@@ -27,8 +27,10 @@ class Knight:
         self.redundancy = 20
         # HP因子
         self.hp_scale = 10
-        # distance因子
-        self.distance_scale = 2
+        # x轴奖励
+        self.x_reward = 2
+        # y轴奖励
+        self.y_reward = 2
         # 基本信息
         self.hp = 9
         self.mp = 0
@@ -61,7 +63,8 @@ class Knight:
         # 记录攻击距离(horizontal, up, down), 记录下默认值, 就不用反复计算了
         self.attack_distance = 307 - self.redundancy, 307 - self.redundancy, 273 - self.redundancy
         # 能够收获奖励的最远距离, 超过这个距离就要负reward了
-        self.value_distance = 4 * self.attack_distance[0]
+        self.x_distance = 4 * self.attack_distance[0]
+        self.y_distance = 4 * self.attack_distance[2]
         # 记录每个动作的价值
         self.move_values = []
         self.action_values = []
@@ -519,19 +522,23 @@ class Turing:
             case 'GG_Hornet_2':
                 match scene:
                     case 'GG_Hornet_2':
+                        # knight奖励与是否掉血相关
                         _knight = collider['Knight']
                         knight_reward = knight.get_reward(_knight)
                         knight.update(_knight)
 
+                        # boss奖励与boss是否掉血相关
                         _enemies = collider['Enemies']
                         boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
 
-                        action_reward = knight_reward + boss_reward
+                        # distance奖励与knight到达enemy的距离相关
+                        x_reward, y_reward = self._get_distance_reward(_knight, _enemies) if _enemies else 0
 
-                        enemy_reward = self._get_move_reward(_knight, _enemies) if _enemies else 0
+                        # wall奖励与knight是否撞墙相关
                         wall_reward = game.get_wall_reward(_knight)
 
-                        move_reward = enemy_reward + wall_reward
+                        action_reward = boss_reward + y_reward
+                        move_reward = knight_reward + x_reward + wall_reward
 
                         game.update(_knight)
                         # draw_ui(collider['Knight'], collider['Enemies'], collider['Attacks'])
@@ -541,15 +548,14 @@ class Turing:
 
                         state, move_index, action_index, move_random, action_random = \
                             self._fight_boss(knight_points, enemy_points)
-                        pool.record(state, move_index, action_index, move_reward, 0)
+                        pool.record(state, move_index, action_index, move_reward, action_reward)
 
-                        if move_reward or action_reward:
-                            print(receive_time, 'Turing',
-                                  '[random]:' if move_random else '[prediction]:',
-                                  'move', game.move_names[move_index], 'get', move_reward,
-                                  '[random]:' if action_random else '[prediction]:',
-                                  'action', game.action_names[action_index], 'get', action_reward,
-                                  )
+                        print(receive_time, 'Turing',
+                              '[random]:' if move_random else '[prediction]:',
+                              'move', game.move_names[move_index], 'get', move_reward,
+                              '[random]:' if action_random else '[prediction]:',
+                              'action', game.action_names[action_index], 'get', action_reward,
+                              )
                     case 'GG_Workshop':
                         self._end_boss(receive_time)
         return scene
@@ -563,28 +569,35 @@ class Turing:
         boss.reset()
         start_draw()
 
-    def _get_move_reward(self, knight_data: dict, enemies_data: list):
-        boss_data = next(filter(boss.filter_boss, enemies_data))
-        boss_x_list = [position[0] for position in boss_data['position']]
-        boss_y_list = [position[1] for position in boss_data['position']]
-        knight_x_list = [position[0] for position in knight_data['position']]
-        knight_y_list = [position[1] for position in knight_data['position']]
-        # 两两相减, 得出最小的距离
-        x_distance = min([abs(boss_x - knight_x) for knight_x in knight_x_list for boss_x in boss_x_list])
-        y_distance = min([abs(boss_y - knight_y) for knight_y in knight_y_list for boss_y in boss_y_list])
-        # 计算奖励
+    def _get_distance_reward(self, _knight: dict, enemies_data: list) -> (float, float):
+        _boss = next(filter(boss.filter_boss, enemies_data))
+
+        (boss_left, boss_top), (boss_right, boss_bottom) = tuple(tuple(point) for point in _boss['position'])
+        (knight_left, knight_top), (knight_right, knight_bottom) = tuple(tuple(point) for point in _knight['position'])
+
+        x_distance = self._get_distance(knight_left, knight_right, boss_left, boss_right)
+        y_distance = self._get_distance(knight_top, knight_bottom, boss_top, boss_bottom)
+
         attack_x, attack_up, attack_down = knight.attack_distance
-        # 攻击范围内和攻击范围外使用2套奖励逻辑
-        if x_distance <= attack_x:
-            # 使用线性函数y = kx + b
-            b = -knight.hp_scale
-            k = (knight.distance_scale + knight.hp_scale) / attack_x
-            return k * x_distance + b
-        else:
-            # 使用另外一个线性函数 (x - x1) / (x2 - x1) = (y - y1) / (y2 - y1)
-            # y = (y2 - y1)*(x - x1)/(x2 - x1) + y1
-            return (-knight.distance_scale) * (x_distance - attack_x) / (knight.value_distance - attack_x) \
-                   + knight.distance_scale
+
+        x_reward = knight.x_reward / attack_x * x_distance if x_distance <= attack_x else \
+            self._get_linear_reward(x_distance, attack_x, knight.x_reward, knight.x_distance, 0)
+
+        y_reward = 0 if x_distance > 2 * attack_x else \
+            knight.y_reward / attack_down * y_distance if y_distance <= attack_down else \
+            self._get_linear_reward(y_distance, attack_down, knight.y_reward, knight.y_distance, 0)
+
+        return x_reward, y_reward
+
+    def _get_linear_reward(self, x: float, x1: float, y1: float, x2: float, y2: float) -> float:
+        """
+        使用另外一个线性函数 (x - x1) / (x2 - x1) = (y - y1) / (y2 - y1)
+        # y = (y2 - y1)*(x - x1)/(x2 - x1) + y1
+        """
+        return (y2 - y1) * (x - x1) / (x2 - x1) + y1
+
+    def _get_distance(self, a: float, b: float, c: float, d: float) -> float:
+        return 0 if c < a < d or c < b < d else min(min(abs(a - c), abs(a - d)), min(abs(b - c), abs(b - d)))
 
     def _fight_boss(self, knight_points: list[list[int]], enemies_points: list[list[int]]):
         """

@@ -234,6 +234,15 @@
    3. boss开始移动, 验证knight可以走到boss身边, √
       1. 验证通过, √
    4. boss开始移动, 验证knight可以通过跳跃完成对boss的躲避
+      1. knight不用移动, √
+         1. 并未感觉到knight有明显的躲避boss的意图, √
+            1. action_reward没有得到任何奖励, √
+               1. 距离计算错误, 全是负奖励, √
+                  1. 调整reward计算方式, √
+         2. knight不停跳跃, 完成验证, √
+      2. knight移动, √
+         1. 有明显的躲避和跟随行为
+         2. 但是还是存在碰撞的情况
    5. boss添加技能:冲刺, 验证knight可以跳跃完成对boss的躲避
    6. boss添加技能:attack, 验证knight可以跳跃完成对boss的躲避
    7. knight添加攻击, 验证knight可以完成对boss的击杀

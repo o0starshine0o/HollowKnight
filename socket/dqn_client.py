@@ -16,6 +16,8 @@ class JsonEncoder(json.JSONEncoder):
 class Env:
     x = 293, 2260
     y = 173, 1080
+    velocity = 30
+    d_velocity = 2
 
 
 class Knight:
@@ -24,7 +26,7 @@ class Knight:
         self.hp = 9
         self.mp = 0
         self.state = 'airborne'
-        self.velocity = [0, 0]
+        self.velocity = [0, -Env.velocity]
         self.invulnerable = False
         self.dashing = False
         self.superDashing = False
@@ -40,21 +42,31 @@ class Knight:
     def update(self, index: int, move_index: int, action_index: int):
         match move_index:
             case 1:
-                self.velocity = [-random.randint(40, 60), 0]
+                self.velocity[0] = -random.randint(40, 60)
                 self.facingRight = False
             case 2:
-                self.velocity = [random.randint(40, 60), 0]
+                self.velocity[0] = random.randint(40, 60)
                 self.facingRight = True
+
+        # 未跳跃, 未下落时, 才允许跳跃
+        if action_index == 2 and not self.jumping and not self.falling:
+            self.velocity[1] = Env.velocity
+        else:
+            self.velocity[1] = max(self.velocity[1] - Env.d_velocity, -Env.velocity)
+
+        self.jumping = self.velocity[1] >= 0
+        self.falling = 0 > self.velocity[1] > -Env.velocity
 
         # left
         self.position[0][0] += self.velocity[0]
         self.position[0][0] = max(min(self.position[0][0], Env.x[1]), Env.x[0])
-        # top
-        self.position[0][1] += self.velocity[1]
+        # bottom
+        self.position[1][1] += self.velocity[1]
+        self.position[1][1] = max(min(self.position[1][1], Env.y[1]), Env.y[0])
         # right
         self.position[1][0] = self.position[0][0] + 43
-        # bottom
-        self.position[1][1] = self.position[0][1] - 110
+        # top
+        self.position[0][1] = self.position[1][1] + 110
 
         self.touchingWall = self.position[0][0] == Env.x[1] or self.position[0][0] == Env.x[0]
 
