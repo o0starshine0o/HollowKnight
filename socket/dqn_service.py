@@ -25,7 +25,7 @@ class Knight:
     def __init__(self):
         # 冗余攻击距离
         self.redundancy = 20
-        # HP因子
+        # HP因子, 因为knight的血量变化为1, 需要对其缩放
         self.hp_scale = 10
         # x轴奖励
         self.x_reward = 2
@@ -128,11 +128,11 @@ class Knight:
 
 
 class Boss:
-    def __init__(self, name='Hornet Boss 2'):
+    def __init__(self, name='Hornet Boss 1'):
         self.hp = 800
         self.name = name
 
-    def reset(self, name='Hornet Boss 2'):
+    def reset(self, name='Hornet Boss 1'):
         self.hp = 800
         self.name = name
 
@@ -383,7 +383,7 @@ class Game:
             else:
                 self.wall[0] = point_x[0]
 
-    def get_wall_reward(self, _knight: dict) -> int:
+    def get_wall_reward(self, _knight: dict) -> float:
         knight_x_list = [position[0] for position in _knight['position']]
         distance = min([abs(wall_x - knight_x) for knight_x in knight_x_list for wall_x in game.wall])
         reward = (self.wall_distance * self.wall_reward - self.wall_reward * distance) / self.wall_distance
@@ -517,12 +517,13 @@ class Turing:
         match pre_scene:
             case 'GG_Workshop':
                 match scene:
-                    case 'GG_Hornet_2':
+                    case 'GG_Hornet_1':
                         self._before_boss(receive_time)
-            case 'GG_Hornet_2':
+            case 'GG_Hornet_1':
                 match scene:
-                    case 'GG_Hornet_2':
+                    case 'GG_Hornet_1':
                         # knight奖励与是否掉血相关
+                        # 取值范围[0|-10]
                         _knight = collider['Knight']
                         knight_reward = knight.get_reward(_knight)
                         knight.update(_knight)
@@ -532,9 +533,11 @@ class Turing:
                         boss_reward = boss.get_reward(next(filter(boss.filter_boss, _enemies))) if _enemies else 0
 
                         # distance奖励与knight到达enemy的距离相关
-                        x_reward, y_reward = self._get_distance_reward(_knight, _enemies) if _enemies else 0
+                        # 取值范围(-1, 2)
+                        x_reward, y_reward = self._get_distance_reward(_knight, _enemies) if _enemies else (0, 0)
 
                         # wall奖励与knight是否撞墙相关
+                        # 取值范围(-2, 0)
                         wall_reward = game.get_wall_reward(_knight)
 
                         action_reward = boss_reward + y_reward
@@ -616,7 +619,7 @@ class Turing:
         # 把得到的状态给DQN, 拿到action
         move_index, action_index, move_random, action_random = agent.get_action(state_reshape, self.fight_count)
         # 把dqn计算得到的action给游戏
-        # game.step(game.moves[move_index], game.actions[0])
+        game.step(game.moves[move_index], game.actions[action_index])
 
         return state_fixed, move_index, action_index, move_random, action_random
 
@@ -649,7 +652,7 @@ class Turing:
         self.fight_count += 1
 
         # 准备下一场挑战
-        # game.challenge()
+        game.challenge()
         end_draw()
 
 

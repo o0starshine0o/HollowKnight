@@ -74,7 +74,7 @@ class Knight:
 class Enemy:
     hp = 800
     maxHp = 800
-    name = "Hornet Boss 2"
+    name = "Hornet Boss 1"
     isActive = True
     position = [[1695, 283], [1814, 173]]
     move = 50
@@ -89,7 +89,7 @@ class Enemy:
     def _init_hornet(self):
         self.hp = 800
         self.maxHp = 800
-        self.name = "Hornet Boss 2"
+        self.name = "Hornet Boss 1"
         self.isActive = True
         self.position = [[1695, 283], [1814, 173]]
 
@@ -150,7 +150,7 @@ class Data:
         self.scene = 'GG_Workshop'
 
     def _to_hornet(self):
-        self.scene = 'GG_Hornet_2'
+        self.scene = 'GG_Hornet_1'
 
     def update(self, index: int, move_index: int, action_index: int):
         """
