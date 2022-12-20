@@ -129,11 +129,11 @@ class Knight:
 
 class Boss:
     def __init__(self, name='Hornet Boss 1'):
-        self.hp = 800
+        self.hp = 900
         self.name = name
 
     def reset(self, name='Hornet Boss 1'):
-        self.hp = 800
+        self.hp = 900
         self.name = name
 
     def filter_boss(self, enemy: dict) -> bool:
@@ -146,10 +146,12 @@ class Boss:
 
 
 class Pool:
+    __range = 30
 
     def __init__(self, save_path: str = None, size: int = 10 * 60 * 60):
         self.size = size
         self.names = '/states.npy', '/moves.npy', '/actions.npy', '/move_rewards.npy', '/action_rewards.npy'
+
         if self._file_exist(save_path):
             self.states, self.moves, self.actions, self.move_rewards, self.action_rewards = \
                 tuple(np.load(save_path + name) for name in self.names)
@@ -172,6 +174,15 @@ class Pool:
         # reward 为上一步的action的奖励, 所以往上推一步
         self.move_rewards[self.current - 1] = move_reward
         self.action_rewards[self.current - 1] = action_reward
+
+        # 一旦获取到奖励, 把奖励叠加到之前的N个动作上去, 尝试解决稀疏奖励问题
+        if move_reward != 0:
+            for before in range(1, self.__range):
+                self.move_rewards[self.current - 1 - before] += move_reward * (self.__range - before) / self.__range
+        if action_reward != 0:
+            for before in range(1, self.__range):
+                self.action_rewards[self.current - 1 - before] += action_reward * (self.__range - before) / self.__range
+
         self.current += 1
         self.count = max(self.count, self.current)
         self.current %= self.size
@@ -534,14 +545,17 @@ class Turing:
 
                         # distance奖励与knight到达enemy的距离相关
                         # 取值范围(-1, 2)
-                        x_reward, y_reward = self._get_distance_reward(_knight, _enemies) if _enemies else (0, 0)
+                        # x_reward, y_reward = self._get_distance_reward(_knight, _enemies) if _enemies else (0, 0)
 
                         # wall奖励与knight是否撞墙相关
                         # 取值范围(-2, 0)
-                        wall_reward = game.get_wall_reward(_knight)
+                        # wall_reward = game.get_wall_reward(_knight)
 
-                        action_reward = boss_reward + y_reward
-                        move_reward = knight_reward + x_reward + wall_reward
+                        # action_reward = boss_reward + y_reward
+                        # move_reward = knight_reward + x_reward + wall_reward
+
+                        action_reward = boss_reward
+                        move_reward = knight_reward
 
                         game.update(_knight)
                         # draw_ui(collider['Knight'], collider['Enemies'], collider['Attacks'])
@@ -588,7 +602,7 @@ class Turing:
 
         y_reward = 0 if x_distance > 2 * attack_x else \
             knight.y_reward / attack_down * y_distance if y_distance <= attack_down else \
-            self._get_linear_reward(y_distance, attack_down, knight.y_reward, knight.y_distance, 0)
+                self._get_linear_reward(y_distance, attack_down, knight.y_reward, knight.y_distance, 0)
 
         return x_reward, y_reward
 

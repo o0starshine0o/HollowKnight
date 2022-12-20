@@ -252,7 +252,7 @@
    9. knight添加上劈和下劈, 验证knight可以完成对boss的击杀
 6. 开始真正的AI
    1. 验证模型可学习, √
-      1. 选择攻击键, 只要执行了攻击就给reward, 一段时间后只出现攻击, 这就验证了模型可学习
+      1. 选择攻击键, 只要执行了攻击就给reward, 一段时间后只出现攻击, 这就验证了模型可学习, √
          1. 执行了过多的None操作和左移操作
             1. 增大经验池, √
             2. 如果数据不够, 就采取随机动作, √
@@ -343,7 +343,7 @@
                      1. 查看下debug-mod是怎么获取到knight的状态的, √
                         1. InfoPanel.GetHeroPos, √
                         2. CustomInfoPanel.GetMainInfoPanel, √
-               3. 与BOSS的范围作为一个连续奖励标准
+               3. 与BOSS的范围作为一个连续奖励标准, ×
                   1. 按照x轴攻击距离设置一个函数, 先让模型跑起来, √
                   2. null的数量计算不对, √
                      1. knight.actions里面存放了str类型, 可能是早期为了方便吧, √
@@ -420,11 +420,13 @@
          1. y轴reward设计
          2. 增加high_jump, low_jump, double_jump做具体区分
          3. reward计算学习的时候需要分离, 让其分别计算下降梯度
-            1. 先关掉action的奖励, knight调为无敌, 验证只有move作为reward时, knight是否正确移动
+            1. 先关掉action的奖励, knight调为无敌, 验证只有move作为reward时, knight是否正确移动, √
             2. 是否随机, 也需要独立计算
             3. 分离后, action的奖励又变得稀疏了
                1. 把jump的奖励也作为action的reward
       8. turing已经学会了使用attack来获取奖励, 需要配合jump和move来获取更多的奖励
+      9. 奖励设置为一个衰减函数, 尝试解决稀疏奖励问题
+         1. 先试用线性衰减
    3. 优化模型
       1. knight状态输入
       2. 技能输出[具体数值](https://spica.cloud/2019/07/12/Hollow-Knight%E6%B8%B8%E6%88%8F%E6%80%BB%E7%BB%93/)
