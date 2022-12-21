@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import datetime
 from itertools import chain
+from random import choices
 
 import numpy as np
 import pyautogui
@@ -150,10 +151,11 @@ class Pool:
 
     def __init__(self, save_path: str = None, size: int = 10 * 60 * 60):
         self.size = size
-        self.names = '/states.npy', '/moves.npy', '/actions.npy', '/move_rewards.npy', '/action_rewards.npy'
+        self.names = '/states.npy', '/moves.npy', '/actions.npy', '/move_rewards.npy', '/action_rewards.npy', \
+                     '/losses.npy'
 
         if self._file_exist(save_path):
-            self.states, self.moves, self.actions, self.move_rewards, self.action_rewards = \
+            self.states, self.moves, self.actions, self.move_rewards, self.action_rewards, self.losses = \
                 tuple(np.load(save_path + name) for name in self.names)
             self.current, self.count, size = tuple(np.load(save_path + '/meta.npy'))
             print(f'load pool:[{self.current}|{self.count}|{size}]', save_path)
@@ -163,9 +165,10 @@ class Pool:
             self.actions = np.empty(self.size, dtype=int)
             self.move_rewards = np.zeros(self.size)
             self.action_rewards = np.zeros(self.size)
+            self.losses = np.ones(self.size)
             self.current = 0
             self.count = 0
-        self.data = (self.states, self.moves, self.actions, self.move_rewards, self.action_rewards)
+        self.data = (self.states, self.moves, self.actions, self.move_rewards, self.action_rewards, self.losses)
 
     def record(self, state: np.ndarray, move: int, action: int, move_reward: float, action_reward: float):
         self.states[self.current] = state
@@ -187,23 +190,33 @@ class Pool:
         self.count = max(self.count, self.current)
         self.current %= self.size
 
-    def recall(self, size: int) -> tuple | None:
+    def recall(self, size: int, with_weight=False) -> tuple | None:
         """
         Returns:
+            indices: 选取的索引
             states: 选取的状态S0
             moves: 此状态下选取的移动A0
             actions: 此状态下选取的动作A0
             move_rewards: 选取移动的奖励R0
             action_rewards: 选取动作的奖励R0
+            loss: 当前状态对应的损失L0
             next_states: 到达的下一个状态S1
         """
         if self.count < size:
             print('size < count', 'not enough data')
             return
-        indices = np.array(random.sample(range(self.count), size))
+        # 当前批次选中的索引
+        indices = choices(range(self.count), self.losses[:self.count], k=size) if with_weight \
+            else choices(range(self.count), k=size)
+        indices = np.array(indices)
+        # 当前批次选中的索引对应的下一个索引
         next_indices = (indices + 1) % self.count
-        all_data = (self.states, self.moves, self.actions, self.move_rewards, self.action_rewards)
-        return tuple(data[indices] for data in all_data) + (self.states[next_indices],)
+        # 返回所有选中的数据
+        return (indices,) + tuple(data[indices] for data in self.data) + (self.states[next_indices],)
+
+    def update_loss(self, indices: np.ndarray, move_action_loss: np.ndarray):
+        for index, loss in zip(indices, move_action_loss):
+            self.losses[index] = loss
 
     def save(self, save_path: str):
         if save_path and os.path.exists(save_path):
@@ -237,7 +250,7 @@ class Agent:
         move_output_layer = Dense(len(game.moves), softmax)(move)
         action_output_layer = Dense(len(game.actions), softmax)(action)
         model = Model(input_layer, [move_output_layer, action_output_layer])
-        model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
+        model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.NONE))
         return model
 
     def get_action(self, state: np.ndarray, fight_count=0):
@@ -277,15 +290,21 @@ class Agent:
         try:
             with writer.as_default():
                 while True:
-                    data = pool.recall(batch_size)
+                    data = pool.recall(batch_size, True)
                     if not data:
                         # 避免无数据时空转
                         time.sleep(empty_sleep_time)
                         continue
 
-                    # 核心梯度下降过程
-                    move_loss, action_loss = self._learn_kernel(*data, gamma=gamma)
-                    self.move_loss, self.action_loss = move_loss.numpy(), action_loss.numpy()
+                    indices, states, moves, actions, move_rewards, action_rewards, _, next_states = data
+                    # 核心批梯度下降过程
+                    move_loss, action_loss = self._learn_kernel(states, moves, actions, move_rewards, action_rewards,
+                                                                next_states, gamma)
+                    # 更新loss
+                    pool.update_loss(indices, (move_loss + action_loss).numpy())
+                    # 保存批loss的均值
+                    self.move_loss = tf.reduce_mean(move_loss).numpy()
+                    self.action_loss = tf.reduce_mean(action_loss).numpy()
 
                     step += 1
 
@@ -329,8 +348,9 @@ class Agent:
             action_q = tf.reduce_sum(tf.multiply(action_values, one_hot_actions), axis=1)
             # 4, 使用2者的MSE作为loss(差值小于1), 否则使用绝对值(差值大于1)
             # loss = (target_q - q)^2
-            move_loss = self.model.loss(target_move_q, move_q)
-            action_loss = self.model.loss(target_action_q, action_q)
+            # 把入参由(32,)改为(1, 32), 方便保留每一个loss
+            move_loss = self.model.loss(tf.reshape(target_move_q, [-1, 1]), tf.reshape(move_q, [-1, 1]))
+            action_loss = self.model.loss(tf.reshape(target_action_q, [-1, 1]), tf.reshape(action_q, [-1, 1]))
             # 5, 计算梯度, 结果是一个list, 记录了每一层, 每一个cell需要下降的梯度
             # 多个loss合并, 一同梯度下降
             gradients = tape.gradient(move_loss + action_loss, self.model.trainable_variables)
