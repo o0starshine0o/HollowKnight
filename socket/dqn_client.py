@@ -191,7 +191,7 @@ def _send_data():
 
     start_draw()
     try:
-        for index in range(data.count):
+        for index in range(data.count + 1):
             data.update(index, move_index, action_index)
             json_data = json.dumps(data, cls=JsonEncoder)
             dict_data = parse_data(json_data)

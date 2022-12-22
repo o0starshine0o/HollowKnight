@@ -431,21 +431,21 @@
       1. knight状态输入
       2. 技能输出[具体数值](https://spica.cloud/2019/07/12/Hollow-Knight%E6%B8%B8%E6%88%8F%E6%80%BB%E7%BB%93/)
          1. 攻击(下劈, 上劈), 21 * 1.5 = 32, √
-            1. WallSlash
-            2. AltSlash
-            3. Slash
-            4. UpSlash
-            5. DownSlash
+            1. WallSlash, √
+            2. AltSlash, √
+            3. Slash, √
+            4. UpSlash, √
+            5. DownSlash, √
          2. 冲刺, 0, **无敌**
          3. 旋风斩(蓄力), 1.25倍, 3~7次, 79~184, Hit L, Hit R, ×
          4. 强力斩(蓄力), 2.5倍, 52, Great Slash, ×
          5. 冲刺斩(蓄力), 2.5倍, 52, Dash Slash, ×
-         6. 暗影之魂, 30, Fireball2 Spiral(Clone)
-         7. 黑暗降临, 15(俯冲) + 30(低波) + 15(高波) = 60, **无敌**
+         6. 暗影之魂, 30, Fireball2 Spiral(Clone), √
+         7. 黑暗降临, 15(俯冲) + 30(低波) + 15(高波) = 60, **无敌**, √
             1. Q Fall Damage
             2. Hit L
             3. Hit R
-         8. 深渊尖叫, 20 * 4 = 80, 滞空
+         8. 深渊尖叫, 20 * 4 = 80, 滞空, √
             1. Hit R
             2. Hit L
             3. Hit U

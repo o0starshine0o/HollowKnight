@@ -261,11 +261,14 @@ class Agent:
         # 即便经验池够了, 还是需要一定的探索性
         move_random = pool.current < 1000 or random.random() < 0.05
         action_random = pool.current < 1000 or random.random() < 0.05
+
         move_values, action_values = tuple(prediction.numpy() for prediction in self.__get_prediction__(state))
+
         move_index = self._get_random_move_index() if move_random else move_values.argmax()
         action_index = random.randint(0, game.len_actions - 1) if action_random else action_values.argmax()
+
         knight.move_values.append(tuple(map(float, move_values[0])))
-        knight.action_values.append(tuple(map(float, move_values[0])))
+        knight.action_values.append(tuple(map(float, action_values[0])))
         # 记录每一个动作的价值
         with tf.name_scope(f"fight_count[{fight_count}]"):
             move_value = dict(zip(game.move_names, knight.move_values[-1]))
@@ -398,7 +401,11 @@ class Game:
             ('attack', 'j'),
             ('jump', 'k'),
             ('up_attack', ['w', 'j']),
-            ('down_attack', ['s', 'j'])
+            ('down_attack', ['s', 'j']),
+            ('dash', 'l'),
+            ('ball', 'o'),
+            ('up_ball', ['w', 'o']),
+            ('down_ball', ['s', 'o']),
         ]
         self.len_actions = len(self.actions)
         self.len_moves = len(self.moves)
@@ -482,8 +489,8 @@ class Turing:
         self.boss_start = datetime.now()
         # 记录本次turing与boss对战的次数
         self.fight_count = 0
-        # 记录下HollowKnight发送状态到收到动作的时间延迟
-        self.delay_time = []
+        # # 记录下HollowKnight发送状态到收到动作的时间延迟
+        # self.delay_time = []
         # 不解释
         print("Make AI Great Again")
 
@@ -535,10 +542,10 @@ class Turing:
         json_data = parse_data(origin_data)
         if json_data is None:
             return
-        # 发送时间
-        send_time = datetime.strptime(json_data['time'], self._time_format)
-        # 延迟的时间
-        self.delay_time.append(receive_time - send_time)
+        # # 发送时间
+        # send_time = datetime.strptime(json_data['time'], self._time_format)
+        # # 延迟的时间
+        # self.delay_time.append(receive_time - send_time)
 
         # 根据不同场景, 进入到不同的任务
         scene = json_data['scene']
@@ -601,7 +608,7 @@ class Turing:
         """ 进入BOSS场景, 需要初始化一些操作
         """
         self.boss_start = boss_start
-        self.delay_time = []
+        # self.delay_time = []
         knight.reset()
         boss.reset()
         start_draw()
@@ -662,10 +669,10 @@ class Turing:
         """
         # 本场统计
         print("Fight boss within:", (end_time - self.boss_start).seconds, "s")
-        print("Take actions:", len(self.delay_time))
-        if len(self.delay_time) > 0:
-            average_time_delay = np.mean(list(map(lambda delay: delay.total_seconds(), self.delay_time)))
-            print("Average time delay:", average_time_delay * 1000, "ms")
+        # print("Take actions:", len(self.delay_time))
+        # if len(self.delay_time) > 0:
+        #     average_time_delay = np.mean(list(map(lambda delay: delay.total_seconds(), self.delay_time)))
+        #     print("Average time delay:", average_time_delay * 1000, "ms")
         # 记录下boss的血量
         tf.summary.scalar('BOSS HP', boss.hp, self.fight_count)
         # 统计每个动作的使用次数
@@ -698,6 +705,7 @@ def get_save_path(prefix, time_format='%m-%d_%H:%M:%S'):
 
 
 if __name__ == '__main__':
+    pyautogui.FAILSAFE = False
     start_time = datetime.now()
     writer = tf.summary.create_file_writer(get_save_path('log/'))
     game = Game()
