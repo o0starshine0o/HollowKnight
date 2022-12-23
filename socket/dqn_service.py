@@ -679,6 +679,7 @@ class Turing:
         with tf.name_scope(f"fight_count[{self.fight_count}]"):
             move_frequency = [0] * game.len_moves
             action_frequency = [0] * game.len_actions
+            # 随机操作时, 虽然记录的是预测的价值, 但是并没有采用
             for index in [np.array(move_value).argmax() for move_value in knight.move_values]:
                 move_frequency[index] += 1
             for index in [np.array(action_value).argmax() for action_value in knight.action_values]:
