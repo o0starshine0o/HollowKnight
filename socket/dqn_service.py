@@ -232,10 +232,18 @@ class Agent:
 
     def __init__(self, save_path: str = None, input_size=32, gamma=0.99, learning_rate=0.001, batch_size=32):
         if save_path and os.path.exists(save_path):
-            self.model = tf.keras.models.load_model(save_path + '/model.tf')
+            # 用来预测的model
+            self.main_model = tf.keras.models.load_model(save_path + '/model.tf')
+            # 专门用来计算Q(S_{t+1}, a)的model, 使用同一份文件, 保证2个model的数据是一致的
+            self.target_model = tf.keras.models.load_model(save_path + '/model.tf')
             print(f'load model:', save_path + '/model.tf')
         else:
-            self.model = self.__build_deep_q_network__(Input(input_size), learning_rate)
+            # 用来预测的model
+            self.main_model = self.__build_deep_q_network__(Input(input_size), learning_rate)
+            # 专门用来计算Q(S_{t+1}, a)的model
+            self.target_model = self.__build_deep_q_network__(Input(input_size), learning_rate)
+            # 保证初始值一致
+            self.target_model.set_weights(self.main_model.get_weights())
         # 程序启动就开始学习, 生命不停, 学习不止
         self.learn_thread = _thread.start_new_thread(self._learn, (gamma, batch_size))
         self.move_loss = sys.maxsize
@@ -317,9 +325,11 @@ class Agent:
                         tf.summary.scalar('action_loss', self.action_loss, step)
                         writer.flush()
 
-                    # 输出一些信息表明线程正常运行
-                    if step % 100 == 0:
-                        # 不解释
+                    # 把主model的参数同步给target_model
+                    if step % 200 == 0:
+                        # 把主model的参数同步给target_model
+                        agent.target_model.set_weights(agent.main_model.get_weights())
+                        # 输出一些信息表明线程正常运行
                         print(f'good good study: {datetime.now() - start}, '
                               f'day day up {self.move_loss}, {self.action_loss}')
                         start = datetime.now()
@@ -332,7 +342,7 @@ class Agent:
         # next_moves_value_max = max(Q(S_1, W)), shape: (32, )
         # next_actions_value_max = max(Q(S_1, W)), shape: (32,)
         next_moves_value_max, next_actions_value_max = \
-            tuple(prediction.numpy().max(axis=1) for prediction in self.__get_prediction__(next_states))
+            tuple(prediction.numpy().max(axis=1) for prediction in self.__get_next_q(next_states))
         # 2, 添加gamma, reward作为target_q
         # target_move_q = R_0 + gamma * next_q_max, shape: (32, )
         target_move_q = move_rewards + gamma * next_moves_value_max
@@ -352,21 +362,21 @@ class Agent:
             # 4, 使用2者的MSE作为loss(差值小于1), 否则使用绝对值(差值大于1)
             # loss = (target_q - q)^2
             # 把入参由(32,)改为(1, 32), 方便保留每一个loss
-            move_loss = self.model.loss(tf.reshape(target_move_q, [-1, 1]), tf.reshape(move_q, [-1, 1]))
-            action_loss = self.model.loss(tf.reshape(target_action_q, [-1, 1]), tf.reshape(action_q, [-1, 1]))
+            move_loss = self.main_model.loss(tf.reshape(target_move_q, [-1, 1]), tf.reshape(move_q, [-1, 1]))
+            action_loss = self.main_model.loss(tf.reshape(target_action_q, [-1, 1]), tf.reshape(action_q, [-1, 1]))
             # 5, 计算梯度, 结果是一个list, 记录了每一层, 每一个cell需要下降的梯度
             # 多个loss合并, 一同梯度下降
-            gradients = tape.gradient(move_loss + action_loss, self.model.trainable_variables)
+            gradients = tape.gradient(move_loss + action_loss, self.main_model.trainable_variables)
             # 梯度不大, 没必要裁剪
             # gradients = [tf.clip_by_norm(gradient, 15) for gradient in gradients]
         # 6, 反向传播, 更新model的参数
-        self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        self.main_model.optimizer.apply_gradients(zip(gradients, self.main_model.trainable_variables))
 
         return move_loss, action_loss
 
     def save(self, save_path: str = None):
         if save_path and os.path.exists(save_path):
-            self.model.save(save_path + '/model.tf')
+            self.main_model.save(save_path + '/model.tf')
             print('save model:', save_path + '/model.tf')
 
     @tf.function
@@ -374,7 +384,16 @@ class Agent:
         """
         Return: list: [shape(1, 3), shape(1, 5)]
         """
-        return self.model(state)
+        return self.main_model(state)
+
+    def __get_next_q(self, state: np.ndarray) -> list[tf.Tensor]:
+        """
+        根据论文[Deep Reinforcement Learning with Double Q-learning](https://arxiv.org/abs/1509.06461)
+        使用一个专门的网络来计算目标的Q值
+
+        Return: list: [shape(1, 3), shape(1, 5)]
+        """
+        return self.target_model(state)
 
 
 class Game:
